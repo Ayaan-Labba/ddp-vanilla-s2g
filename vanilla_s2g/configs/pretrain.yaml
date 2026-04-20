@@ -1,0 +1,78 @@
+# =============================================================================
+# Vanilla S2G — Pre-training Configuration
+# =============================================================================
+# Every value here can be overridden from the command line:
+#   python scripts/pretrain.py --lr 3e-5 --train_batch_size 8
+#
+# For W&B sweeps, the sweep agent injects overrides automatically.
+# =============================================================================
+
+# ---- Model ----
+model_name: google/flan-t5-large
+
+# ---- Tokenisation ----
+max_source_length: 300       # Max encoder input length (SSI + text) in subword tokens
+max_target_length: 150       # Max decoder target length (SEL) in subword tokens
+
+# ---- Optimiser (AdamW) ----
+lr: 5.0e-5
+weight_decay: 0.0            # Following REBEL; regularisation deferred to follow-up
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1.0e-8
+
+# ---- Scheduler (inverse square root) ----
+scheduler: inverse_sqrt
+warmup_steps: 1000           # Linear warmup from 0 → lr
+
+# ---- Training loop ----
+max_steps: 1000000
+train_batch_size: 4
+gradient_acc_steps: 8        # Effective batch size: 4 × 8 = 32
+gradient_clip_value: 10.0
+precision: 16                # Mixed precision (fp16)
+seed: 0                      # Deterministic: model init, data shuffle, SSI sampling
+
+# ---- Validation ----
+val_check_interval: 10000    # Validate every N training steps
+val_percent_check: 0.2       # Fraction of validation set used per check
+early_stopping_patience: 10  # Patience in validation checks (not steps)
+early_stopping_metric: val_f1
+
+# ---- Generation (beam search at validation time) ----
+eval_beams: 3
+length_penalty: 0.0          # No penalty for long sequences
+no_repeat_ngram_size: 0      # Same entity span may recur legitimately
+early_stopping_generation: false  # Do not truncate triplets prematurely
+constraint_decoding: false   # Disabled during pre-training (learning from mistakes)
+
+# ---- SSI sampling (dynamic construction) ----
+positive_rate: 0.9           # Bernoulli probability for including each positive type
+negative_rate: 0.1           # Bernoulli probability for sampling each (selected) negative type
+negative_max_start: 1        # k(0): max negative types at start of training
+negative_max_end: 30         # k(T): max negative types at end of training
+random_prompt: false         # Shuffle SSI type order (false = alphabetical)
+random_sel: false            # Shuffle entity/relation order in the SEL target
+
+# ---- Checkpointing ----
+save_top_k: 3               # Keep top-k checkpoints by checkpoint_metric
+checkpoint_metric: val_f1
+checkpoint_mode: max         # Higher is better for F1
+save_last: true              # Always keep the latest checkpoint
+
+# ---- Callbacks ----
+sample_generation_interval: 50000  # Log predicted vs gold triplets every N steps
+
+# ---- Weights & Biases ----
+wandb_project: vanilla-s2g
+wandb_entity: null           # Set to your W&B team/username, or null for default
+wandb_run_name: null         # Auto-generated if null
+
+# ---- Data paths ----
+data_dir: data/rebel                       # Directory with train/val/test JSONL files
+schema_file: data/rebel/relation.schema    # One relation type per line
+output_dir: outputs/pretrain               # Checkpoints, logs, predictions
+
+# ---- Hardware ----
+num_workers: 4               # DataLoader workers PER GPU (rule of thumb: 2–4 per GPU)
+gpu_ids: null                # List of GPU indices, e.g. [0, 1, 7]. null = all available

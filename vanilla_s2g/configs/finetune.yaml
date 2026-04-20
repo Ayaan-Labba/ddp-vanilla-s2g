@@ -1,0 +1,81 @@
+# =============================================================================
+# Vanilla S2G — Fine-tuning Configuration (PLACEHOLDER)
+# =============================================================================
+# This configuration will be finalised after pre-training is complete.
+# It inherits the pretrain structure but overrides the following:
+#   - Static SSI (all schema types included in every instance)
+#   - Typed SEL generation (optional, per dataset)
+#   - Early stopping on average of strict and boundary F1
+# =============================================================================
+
+# ---- Model ----
+model_name: google/flan-t5-large
+pretrained_checkpoint: null  # Path to best pre-trained checkpoint
+
+# ---- Tokenisation ----
+max_source_length: 300
+max_target_length: 150
+
+# ---- Optimiser (AdamW) ----
+lr: 5.0e-5                  # May be lowered after tuning
+weight_decay: 0.0
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_epsilon: 1.0e-8
+
+# ---- Scheduler ----
+scheduler: inverse_sqrt
+warmup_steps: 1000
+
+# ---- Training loop ----
+max_steps: 1000000           # Will be dataset-dependent
+train_batch_size: 4
+gradient_acc_steps: 8
+gradient_clip_value: 10.0
+precision: 16
+seed: 0
+
+# ---- Validation ----
+val_check_interval: 10000
+val_percent_check: 0.2
+early_stopping_patience: 10
+early_stopping_metric: val_avg_f1  # Average of strict F1 and boundary F1
+
+# ---- Generation ----
+eval_beams: 3
+length_penalty: 0.0
+no_repeat_ngram_size: 0
+early_stopping_generation: false
+constraint_decoding: false   # Unconstrained during fine-tuning; enabled at test time
+
+# ---- SSI (static during fine-tuning) ----
+static_ssi: true             # Always include full schema
+random_prompt: false
+random_sel: false
+
+# ---- Typed SEL ----
+typed_sel: false             # Enable for datasets with entity type annotations
+entity_types: []             # List of entity type strings (populated per dataset)
+
+# ---- Checkpointing ----
+save_top_k: 3
+checkpoint_metric: val_avg_f1
+checkpoint_mode: max
+save_last: true
+
+# ---- Callbacks ----
+sample_generation_interval: 50000
+
+# ---- Weights & Biases ----
+wandb_project: vanilla-s2g
+wandb_entity: null
+wandb_run_name: null
+
+# ---- Data paths (per-dataset) ----
+data_dir: null               # e.g., data/conll04, data/nyt_multi, data/scierc
+schema_file: null
+output_dir: outputs/finetune
+
+# ---- Hardware ----
+num_workers: 4               # DataLoader workers PER GPU (rule of thumb: 2–4 per GPU)
+gpu_ids: null                # List of GPU indices, e.g. [0, 1, 7]. null = all available
