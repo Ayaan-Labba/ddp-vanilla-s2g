@@ -377,7 +377,7 @@ def main() -> None:
 
     # 1. Load dataset.
     logger.info("Loading dataset: %s", args.dataset_name)
-    dataset = load_dataset(args.dataset_name)
+    dataset = load_dataset(args.dataset_name, "default", revision="refs/convert/parquet")
 
     # 2. Count relation types on the training split and select top-K.
     type_counts = count_relation_types(dataset, split="train")
