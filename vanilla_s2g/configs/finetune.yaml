@@ -48,8 +48,12 @@ no_repeat_ngram_size: 0
 early_stopping_generation: false
 constraint_decoding: false   # Unconstrained during fine-tuning; enabled at test time
 
-# ---- SSI (static during fine-tuning) ----
-static_ssi: true             # Always include full schema
+# ---- SSI (budget-limited during fine-tuning) ----
+positive_rate: 1.0           # Include all gold types during fine-tuning
+negative_rate: 1.0           # Include all sampled negatives (budget limits the count)
+negative_max_start: 30       # Not used in budget mode, but required by collator
+negative_max_end: 30         # Not used in budget mode, but required by collator
+max_types_in_prompt: 30      # Total types in SSI = gold positives + sampled negatives up to 30
 random_prompt: false
 random_sel: false
 
@@ -62,6 +66,10 @@ save_top_k: 3
 checkpoint_metric: val_avg_f1
 checkpoint_mode: max
 save_last: true
+checkpoint_every_n_steps: 5000  # Save a resumable checkpoint every N steps (safety net)
+
+# ---- Resumption ----
+resume_from: null            # Path to checkpoint dir to resume training from (null = fresh start)
 
 # ---- Callbacks ----
 sample_generation_interval: 50000
