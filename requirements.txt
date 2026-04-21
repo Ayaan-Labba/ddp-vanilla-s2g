@@ -1,0 +1,23 @@
+# =============================================================================
+# Vanilla S2G — Python Dependencies
+# =============================================================================
+# Install:  pip install -r requirements.txt
+# =============================================================================
+
+# Core ML
+torch>=2.0.0
+transformers>=4.36.0
+datasets>=2.14.0
+
+# Tokenisation
+nltk>=3.8
+
+# Configuration
+pyyaml>=6.0
+
+# Experiment tracking
+wandb>=0.16.0
+
+# Utilities
+numpy>=1.24.0
+tqdm>=4.65.0
