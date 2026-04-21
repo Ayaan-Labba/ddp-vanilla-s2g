@@ -51,9 +51,9 @@ constraint_decoding: false   # Unconstrained during fine-tuning; enabled at test
 # ---- SSI (budget-limited during fine-tuning) ----
 positive_rate: 1.0           # Include all gold types during fine-tuning
 negative_rate: 1.0           # Include all sampled negatives (budget limits the count)
-negative_max_start: 30       # Not used in budget mode, but required by collator
-negative_max_end: 30         # Not used in budget mode, but required by collator
-max_types_in_prompt: 30      # Total types in SSI = gold positives + sampled negatives up to 30
+negative_max_start: 10       # Not used in budget mode, but required by collator
+negative_max_end: 10         # Not used in budget mode, but required by collator
+max_types_in_prompt: 10      # Total types in SSI = gold positives + sampled negatives up to 30
 random_prompt: false
 random_sel: false
 

@@ -8,7 +8,7 @@
 # =============================================================================
 
 # ---- Model ----
-model_name: google/flan-t5-large
+model_name: google/flan-t5-small
 
 # ---- Tokenisation ----
 max_source_length: 300       # Max encoder input length (SSI + text) in subword tokens
@@ -50,7 +50,7 @@ constraint_decoding: false   # Disabled during pre-training (learning from mista
 positive_rate: 0.9           # Bernoulli probability for including each positive type
 negative_rate: 0.1           # Bernoulli probability for sampling each (selected) negative type
 negative_max_start: 1        # k(0): max negative types at start of training
-negative_max_end: 30         # k(T): max negative types at end of training
+negative_max_end: 10         # k(T): max negative types at end of training
 max_types_in_prompt: null    # null = use k(t) schedule; set to int for fixed budget (fine-tuning)
 random_prompt: false         # Shuffle SSI type order (false = alphabetical)
 random_sel: false            # Shuffle entity/relation order in the SEL target

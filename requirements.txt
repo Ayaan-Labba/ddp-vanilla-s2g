@@ -5,7 +5,7 @@
 # =============================================================================
 
 # Core ML
---extra-index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://download.pytorch.org/whl/cu130
 torch>=2.0.0
 transformers>=4.36.0
 datasets>=2.14.0
