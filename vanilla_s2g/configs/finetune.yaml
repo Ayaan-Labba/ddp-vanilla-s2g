@@ -75,7 +75,7 @@ resume_from: null            # Path to checkpoint dir to resume training from (n
 sample_generation_interval: 50000
 
 # ---- Weights & Biases ----
-wandb_project: vanilla-s2g
+wandb_project: ddp-vanilla-s2g
 wandb_entity: null
 wandb_run_name: null
 

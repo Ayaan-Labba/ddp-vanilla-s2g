@@ -69,9 +69,9 @@ resume_from: null            # Path to checkpoint dir to resume training from (n
 sample_generation_interval: 50000  # Log predicted vs gold triplets every N steps
 
 # ---- Weights & Biases ----
-wandb_project: vanilla-s2g
+wandb_project: ddp-vanilla-s2g
 wandb_entity: null           # Set to your W&B team/username, or null for default
-wandb_run_name: null         # Auto-generated if null
+wandb_run_name: pretrain-small-laptop         # Auto-generated if null
 
 # ---- Data paths ----
 data_dir: data/rebel                       # Directory with train/val/test JSONL files
