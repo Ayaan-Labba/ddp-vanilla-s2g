@@ -9,7 +9,7 @@
 # =============================================================================
 
 # ---- Model ----
-model_name: google/flan-t5-large
+model_name: google/flan-t5-small
 pretrained_checkpoint: null  # Path to best pre-trained checkpoint
 
 # ---- Tokenisation ----

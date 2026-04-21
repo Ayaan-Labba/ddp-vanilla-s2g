@@ -3,3 +3,4 @@ data/rebel/
 
 # Environment
 vs2g-env/
+*__pycache__/
