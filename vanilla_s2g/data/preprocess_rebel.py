@@ -50,8 +50,11 @@ def parse_rebel_triplets(
 
     The REBEL format encodes triplets as::
 
-        <triplet> head_entity <subj> tail_entity <obj> relation_type
-        <triplet> head_entity_2 ...
+        <triplet> head_entity <subj> tail_1 <obj> rel_1 <subj> tail_2 <obj> rel_2
+        <triplet> head_entity_2 <subj> tail_3 <obj> rel_3
+
+    A single ``<triplet>`` block can contain **multiple**
+    ``<subj>...<obj>`` pairs that all share the same head entity.
 
     Args:
         triplet_str: Raw ``triplets`` field from the REBEL dataset.
@@ -69,25 +72,39 @@ def parse_rebel_triplets(
         if not segment:
             continue
 
-        # Expected structure: head <subj> tail <obj> relation
         if "<subj>" not in segment or "<obj>" not in segment:
             logger.debug("Skipping malformed triplet segment: %s", segment)
             continue
 
-        head_rest = segment.split("<subj>", maxsplit=1)
-        head = head_rest[0].strip()
+        # Split on <subj> to separate head from the relation pairs.
+        # Element 0 is the head entity; elements 1..N each contain one
+        # "tail <obj> relation_type" pair.
+        subj_parts = segment.split("<subj>")
+        head = subj_parts[0].strip()
 
-        tail_rest = head_rest[1].split("<obj>", maxsplit=1)
-        tail = tail_rest[0].strip()
-        rel_type = tail_rest[1].strip()
+        if not head:
+            logger.debug("Skipping segment with empty head: %s", segment)
+            continue
 
-        if head and tail and rel_type:
-            triplets.append((head, rel_type, tail))
-        else:
-            logger.debug(
-                "Skipping incomplete triplet: head=%r, rel=%r, tail=%r",
-                head, rel_type, tail,
-            )
+        for subj_part in subj_parts[1:]:
+            subj_part = subj_part.strip()
+            if "<obj>" not in subj_part:
+                logger.debug(
+                    "Skipping malformed <subj> block (no <obj>): %s", subj_part
+                )
+                continue
+
+            tail_rest = subj_part.split("<obj>", maxsplit=1)
+            tail = tail_rest[0].strip()
+            rel_type = tail_rest[1].strip()
+
+            if tail and rel_type:
+                triplets.append((head, rel_type, tail))
+            else:
+                logger.debug(
+                    "Skipping incomplete triplet: head=%r, rel=%r, tail=%r",
+                    head, rel_type, tail,
+                )
 
     return triplets
 
