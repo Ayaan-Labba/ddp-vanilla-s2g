@@ -374,7 +374,7 @@ def main() -> None:
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         data_collator=train_collator,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         compute_metrics=make_compute_metrics(tokenizer),
         callbacks=callbacks,
     )
