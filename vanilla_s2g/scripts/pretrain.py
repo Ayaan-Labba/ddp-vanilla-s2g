@@ -188,6 +188,9 @@ def main() -> None:
 
     # ---- 2. GPU and seed setup ----
     if hasattr(cfg, "gpu_ids") and cfg.gpu_ids is not None:
+        # Normalise gpu_ids: a single int (from --gpu_ids 0) becomes [0].
+        if isinstance(cfg.gpu_ids, (int, float)):
+            cfg.gpu_ids = [int(cfg.gpu_ids)]
         gpu_str = ",".join(str(g) for g in cfg.gpu_ids)
         os.environ["CUDA_VISIBLE_DEVICES"] = gpu_str
         logger.info("CUDA_VISIBLE_DEVICES set to: %s", gpu_str)
@@ -371,7 +374,7 @@ def main() -> None:
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         data_collator=train_collator,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         compute_metrics=make_compute_metrics(tokenizer),
         callbacks=callbacks,
     )
