@@ -33,11 +33,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 from transformers import (
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
     EarlyStoppingCallback,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     set_seed,
 )
+
 from torch.optim.lr_scheduler import LambdaLR
 
 from vanilla_s2g.data import S2GCollator, S2GDataset
@@ -196,6 +199,7 @@ def main() -> None:
         logger.info("CUDA_VISIBLE_DEVICES set to: %s", gpu_str)
 
     set_seed(cfg.seed)
+    rng = np.random.default_rng(cfg.seed)
     logger.info("Random seed set to %d", cfg.seed)
 
     # ---- 3. W&B initialisation ----
@@ -213,7 +217,7 @@ def main() -> None:
             wandb_resume = "must"
             logger.info("Resuming W&B run: %s", wandb_run_id)
 
-    os.environ["WANDB_PROJECT"] = getattr(cfg, "wandb_project", "vanilla-s2g")
+    os.environ["WANDB_PROJECT"] = getattr(cfg, "wandb_project", "ddp-vanilla-s2g")
     if getattr(cfg, "wandb_entity", None):
         os.environ["WANDB_ENTITY"] = cfg.wandb_entity
     if wandb_run_id:
@@ -235,8 +239,6 @@ def main() -> None:
     logger.info("Train: %d instances, Val: %d instances", len(train_dataset), len(val_dataset))
 
     # ---- 5. Initialise model and tokeniser ----
-    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
     num_added = add_special_tokens_to_tokenizer(tokenizer, model)
@@ -289,7 +291,7 @@ def main() -> None:
     )
 
     # Periodic safety-net checkpoints.
-    checkpoint_every = getattr(cfg, "checkpoint_every_n_steps", 5000)
+    checkpoint_every = getattr(cfg, "checkpoint_every_n_steps", 1000)
     wandb_run_id_for_meta = wandb_run_id  # May be set later by W&B init.
     periodic_ckpt = PeriodicCheckpointCallback(
         output_dir=cfg.output_dir,
@@ -300,8 +302,9 @@ def main() -> None:
 
     # Sample generation table for W&B.
     sample_size = min(8, len(val_dataset))
-    sample_batch = [val_dataset[i] for i in range(sample_size)]
-    sample_interval = getattr(cfg, "sample_generation_interval", 50_000)
+    sample_ids = rng.choice(len(val_dataset), size=sample_size, replace=False)
+    sample_batch = [val_dataset[s_id] for s_id in sample_ids]
+    sample_interval = getattr(cfg, "sample_generation_interval", 12_250)
     gen_samples_cb = GenerateTextSamplesCallback(
         tokenizer=tokenizer,
         sample_batch=sample_batch,
@@ -343,6 +346,7 @@ def main() -> None:
         # Evaluation.
         eval_strategy="steps",
         eval_steps=cfg.val_check_interval,
+        per_device_eval_batch_size=cfg.eval_batch_size,
         predict_with_generate=True,
         generation_max_length=cfg.max_target_length,
         generation_num_beams=cfg.eval_beams,

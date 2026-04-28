@@ -48,6 +48,7 @@ trained to handle at that point.
 from __future__ import annotations
 
 import random
+import multiprocessing
 from typing import Any, Dict, List, Optional, Set
 
 from transformers import PreTrainedTokenizerBase
@@ -99,7 +100,7 @@ class S2GCollator:
         self.config = config
 
         # Mutable step counter, updated by StepTrackingCallback.
-        self._current_step: int = 0
+        self._current_step = multiprocessing.Value('i', 0)
         # Optional reference to another collator's step (for eval sharing).
         self._step_source: Optional[S2GCollator] = None
 
@@ -116,11 +117,11 @@ class S2GCollator:
         """
         if self._step_source is not None:
             return self._step_source.current_step
-        return self._current_step
+        return self._current_step.value
 
     @current_step.setter
     def current_step(self, value: int) -> None:
-        self._current_step = value
+        self._current_step.value = value
 
     def share_step_with(self, source: "S2GCollator") -> None:
         """Link this collator's step counter to *source*.
