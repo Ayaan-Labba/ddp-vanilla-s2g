@@ -123,6 +123,10 @@ class GenerateTextSamplesCallback(TrainerCallback):
         model: Optional[Any] = None,
         **kwargs: Any,
     ) -> None:
+        # Only log from the main process to avoid duplication in distributed training.
+        if not state.is_world_process_zero:
+            return
+        
         step = state.global_step
         if step == 0 or step == self._last_logged_step:
             return
@@ -267,8 +271,8 @@ class PeriodicCheckpointCallback(TrainerCallback):
         # Signal the Trainer to save a checkpoint.
         control.should_save = True
 
-        # Persist W&B run ID for seamless resumption.
-        if self.wandb_run_id:
+        # Persist W&B run ID for seamless resumption. Only save from the main process.
+        if self.wandb_run_id and state.is_world_process_zero:
             self._save_run_metadata(step)
 
     def _save_run_metadata(self, step: int) -> None:

@@ -5,58 +5,59 @@
 #   wandb sweep configs/sweep_pretrain.yaml
 #   wandb agent <sweep_id>
 #
-# The agent injects sampled hyperparameters as command-line overrides to
-# scripts/pretrain.py, which merges them with the base pretrain.yaml config.
+# The agent injects sampled hyperparameters via ${args_no_hyphens}, which
+# expands each parameter into a `key=value` arg.  Dotted keys map directly
+# onto nested config fields (e.g. `optimizer.lr` -> cfg.optimizer.lr).
 # =============================================================================
 
 program: scripts/pretrain.py
-method: bayes                # Options: grid, random, bayes
+method: bayes                       # Options: grid, random, bayes
 
 metric:
   name: val_f1
   goal: maximize
 
 parameters:
-  lr:
+  optimizer.lr:
     distribution: log_uniform_values
     min: 1.0e-5
     max: 1.0e-4
 
-  warmup_steps:
+  scheduler.warmup_steps:
     values: [500, 1000, 2000]
 
-  train_batch_size:
+  train.batch_size:
     values: [4, 8]
 
-  gradient_acc_steps:
+  train.gradient_acc_steps:
     values: [4, 8, 16]
 
-  positive_rate:
+  train.gradient_clip_value:
+    values: [1.0, 5.0, 10.0]
+
+  ssi.positive_rate:
     distribution: uniform
     min: 0.7
     max: 1.0
 
-  negative_rate:
+  ssi.negative_rate:
     distribution: uniform
     min: 0.05
     max: 0.3
 
-  negative_max_end:
+  ssi.negative_max_end:
     values: [15, 30, 50]
 
-  gradient_clip_value:
-    values: [1.0, 5.0, 10.0]
-
-  random_prompt:
+  ssi.random_prompt:
     values: [true, false]
 
-  random_sel:
+  ssi.random_sel:
     values: [true, false]
 
 early_terminate:
   type: hyperband
-  min_iter: 50000            # Minimum steps before a run can be terminated
-  eta: 3                     # Aggressiveness of early termination
+  min_iter: 50000                   # Minimum steps before a run can be terminated
+  eta: 3                            # Aggressiveness of early termination
 
 command:
   - ${env}

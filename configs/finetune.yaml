@@ -1,89 +1,89 @@
 # =============================================================================
 # Vanilla S2G — Fine-tuning Configuration (PLACEHOLDER)
 # =============================================================================
-# This configuration will be finalised after pre-training is complete.
-# It inherits the pretrain structure but overrides the following:
-#   - Static SSI (all schema types included in every instance)
-#   - Typed SEL generation (optional, per dataset)
-#   - Early stopping on average of strict and boundary F1
+# Inherits structure from the dataclass schema in scripts/config_utils.py.
+# Will be finalised after pre-training is complete.  Key differences from
+# pretrain.yaml:
+#   - Static SSI: all schema types included in every instance (budget mode).
+#   - Typed SEL: optional, per dataset.
+#   - Early stopping on average of strict and boundary F1.
 # =============================================================================
 
-# ---- Model ----
-model_name: google/flan-t5-small
-pretrained_checkpoint: null  # Path to best pre-trained checkpoint
+model:
+  name: google/flan-t5-small
+  pretrained_checkpoint: null       # Path to best pre-trained checkpoint
 
-# ---- Tokenisation ----
-max_source_length: 300
-max_target_length: 150
+tokenization:
+  max_source_length: 300
+  max_target_length: 150
 
-# ---- Optimiser (AdamW) ----
-lr: 5.0e-5                  # May be lowered after tuning
-weight_decay: 0.0
-adam_beta1: 0.9
-adam_beta2: 0.999
-adam_epsilon: 1.0e-8
+optimizer:
+  lr: 5.0e-5                        # May be lowered after tuning
+  weight_decay: 0.0
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
 
-# ---- Scheduler ----
-scheduler: inverse_sqrt
-warmup_steps: 1000
+scheduler:
+  type: inverse_sqrt
+  warmup_steps: 1000
 
-# ---- Training loop ----
-max_steps: 1000000           # Will be dataset-dependent
-train_batch_size: 4
-gradient_acc_steps: 8
-gradient_clip_value: 10.0
-precision: 16
-seed: 0
+train:
+  max_steps: 1000000                # Will be dataset-dependent
+  batch_size: 4
+  gradient_acc_steps: 8
+  gradient_clip_value: 10.0
+  precision: '16'                   # Quoted: schema declares this as a string
+  seed: 0
 
-# ---- Validation ----
-val_check_interval: 10000
-val_percent_check: 0.2
-early_stopping_patience: 10
-early_stopping_metric: val_avg_f1  # Average of strict F1 and boundary F1
+validation:
+  check_interval: 10000
+  percent_check: 0.2
+  batch_size: 32
+  early_stopping_patience: 10
+  early_stopping_metric: val_avg_f1   # Average of strict and boundary F1
 
-# ---- Generation ----
-eval_beams: 3
-length_penalty: 0.0
-no_repeat_ngram_size: 0
-early_stopping_generation: false
-constraint_decoding: false   # Unconstrained during fine-tuning; enabled at test time
+generation:
+  num_beams: 3
+  length_penalty: 0.0
+  no_repeat_ngram_size: 0
+  early_stopping: false
+  constraint_decoding: false        # Unconstrained during fine-tuning
 
-# ---- SSI (budget-limited during fine-tuning) ----
-positive_rate: 1.0           # Include all gold types during fine-tuning
-negative_rate: 1.0           # Include all sampled negatives (budget limits the count)
-negative_max_start: 10       # Not used in budget mode, but required by collator
-negative_max_end: 10         # Not used in budget mode, but required by collator
-max_types_in_prompt: 10      # Total types in SSI = gold positives + sampled negatives up to 30
-random_prompt: false
-random_sel: false
+ssi:                                # Budget-limited during fine-tuning
+  positive_rate: 1.0                # Include all gold types
+  negative_rate: 1.0                # Include all sampled negatives
+  negative_max_start: 10            # Not used in budget mode (kept for collator API)
+  negative_max_end: 10              # Not used in budget mode
+  max_types_in_prompt: 10           # Total = gold positives + sampled negatives
+  random_prompt: false
+  random_sel: false
 
-# ---- Typed SEL ----
-typed_sel: false             # Enable for datasets with entity type annotations
-entity_types: []             # List of entity type strings (populated per dataset)
+typed_sel:                          # Typed SEL generation
+  enabled: false                    # Enable for datasets with entity-type annotations
+  entity_types: []                  # Populated per dataset
 
-# ---- Checkpointing ----
-save_top_k: 3
-checkpoint_metric: val_avg_f1
-checkpoint_mode: max
-save_last: true
-checkpoint_every_n_steps: 5000  # Save a resumable checkpoint every N steps (safety net)
+checkpoint:
+  save_top_k: 3
+  metric: val_avg_f1
+  mode: max
+  save_last: true
+  every_n_steps: 5000
+  resume_from: null
 
-# ---- Resumption ----
-resume_from: null            # Path to checkpoint dir to resume training from (null = fresh start)
+callbacks:
+  sample_generation_interval: 50000
 
-# ---- Callbacks ----
-sample_generation_interval: 50000
+wandb:
+  project: ddp-vanilla-s2g
+  entity: null
+  run_name: null
 
-# ---- Weights & Biases ----
-wandb_project: ddp-vanilla-s2g
-wandb_entity: null
-wandb_run_name: null
+data:
+  data_dir: null                    # e.g. data/conll04, data/nyt_multi, data/scierc
+  schema_file: null
+  output_dir: outputs/finetune
 
-# ---- Data paths (per-dataset) ----
-data_dir: null               # e.g., data/conll04, data/nyt_multi, data/scierc
-schema_file: null
-output_dir: outputs/finetune
-
-# ---- Hardware ----
-num_workers: 4               # DataLoader workers PER GPU (rule of thumb: 2–4 per GPU)
-gpu_ids: null                # List of GPU indices, e.g. [0, 1, 7]. null = all available
+hardware:
+  num_workers: 4
+  gpu_ids: null

@@ -1,84 +1,88 @@
 # =============================================================================
 # Vanilla S2G — Pre-training Configuration
 # =============================================================================
-# Every value here can be overridden from the command line:
-#   python scripts/pretrain.py --lr 3e-5 --train_batch_size 8
+# Every field here is validated against the dataclass schema in
+# scripts/config_utils.py.  Override any nested field from the command line
+# using OmegaConf dotlist syntax (key=value, dotted for nested keys):
 #
-# For W&B sweeps, the sweep agent injects overrides automatically.
+#   python -m vanilla_s2g.scripts.pretrain --config configs/pretrain.yaml \
+#       optimizer.lr=3e-5 train.batch_size=8
+#
+# For W&B sweeps, the agent injects overrides automatically via
+# ${args_no_hyphens}.  Dotted keys in the sweep `parameters` block (e.g.
+# `optimizer.lr`) map directly onto these nested config fields.
 # =============================================================================
 
-# ---- Model ----
-model_name: google/flan-t5-small    # Pre-trained flan- T5 variant (60M parameters)
+model:
+  name: google/flan-t5-small        # Pre-trained Flan-T5 variant (60M params)
 
-# ---- Tokenisation ----
-max_source_length: 300       # Max encoder input length (SSI + text) in subword tokens
-max_target_length: 150       # Max decoder target length (SEL) in subword tokens
+tokenization:
+  max_source_length: 300            # Encoder input budget (SSI + text)
+  max_target_length: 150            # Decoder target budget (SEL)
 
-# ---- Optimiser (AdamW) ----
-lr: 5.0e-5
-weight_decay: 0.0            # Following REBEL; regularisation deferred to follow-up
-adam_beta1: 0.9
-adam_beta2: 0.999
-adam_epsilon: 1.0e-8
+optimizer:                          # AdamW
+  lr: 1e-4
+  weight_decay: 0.0                 # Following REBEL
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
 
-# ---- Scheduler (inverse square root) ----
-scheduler: inverse_sqrt
-warmup_steps: 1000           # Linear warmup from 0 → lr
+scheduler:
+  type: cosine
+  warmup_steps: 25000               # Linear warmup from 0 → lr
 
-# ---- Training loop ----
-max_steps: 1000000
-train_batch_size: 8
-gradient_acc_steps: 4        # Effective batch size: 8 × 4 = 32
-gradient_clip_value: 10.0
-precision: bf16              # Mixed precision (bfloat16)
-seed: 0                      # Deterministic: model init, data shuffle, SSI sampling
+train:
+  max_steps: 250000
+  batch_size: 16                    # Per-device train batch size
+  gradient_acc_steps: 2             # Effective batch: 16 × 2 = 32
+  gradient_clip_value: 10.0
+  precision: bf16                   # "16" / "bf16" / "32"
+  seed: 0                           # Determines init, data shuffle, SSI sampling
 
-# ---- Validation ----
-val_check_interval: 6125        # Validate every N training steps
-val_percent_check: 0.1          # Fraction of validation set used per check
-eval_batch_size: 32             # Batch size for validation (can be larger than training)
-early_stopping_patience: 12     # Patience in validation checks (not steps)
-early_stopping_metric: val_f1
+validation:
+  check_interval: 6125              # Validate every N training steps
+  percent_check: 0.1                # Fraction of val set used per check
+  batch_size: 32                    # May exceed train batch size
+  early_stopping_patience: 12       # In validation checks, not steps
+  early_stopping_metric: val_f1
 
-# ---- Generation (beam search at validation time) ----
-eval_beams: 3
-length_penalty: 0.0               # No penalty for long sequences
-no_repeat_ngram_size: 0           # Same entity span may recur legitimately
-early_stopping_generation: false  # Do not truncate triplets prematurely
-constraint_decoding: false        # Disabled during pre-training (learning from mistakes)
+generation:                         # Beam search at validation
+  num_beams: 3
+  length_penalty: 0.0               # No bias toward long sequences
+  no_repeat_ngram_size: 0           # Same span may recur legitimately
+  early_stopping: false             # Do not truncate triplets prematurely
+  constraint_decoding: false        # Disabled during pre-training
 
-# ---- SSI sampling (dynamic construction) ----
-positive_rate: 0.9           # Bernoulli probability for including each positive type
-negative_rate: 0.1           # Bernoulli probability for sampling each (selected) negative type
-negative_max_start: 1        # k(0): max negative types at start of training
-negative_max_end: 10         # k(T): max negative types at end of training
-max_types_in_prompt: null    # null = use k(t) schedule; set to int for fixed budget (fine-tuning)
-random_prompt: false         # Shuffle SSI type order (false = alphabetical)
-random_sel: false            # Shuffle entity/relation order in the SEL target
+ssi:                                # Schema-Sensitive-Input dynamic construction
+  positive_rate: 0.9                # Bernoulli prob. for each positive type
+  negative_rate: 0.1                # Bernoulli prob. for each sampled negative
+  negative_max_start: 1             # k(0): max negatives at training start
+  negative_max_end: 10              # k(T): max negatives at training end
+  max_types_in_prompt: null         # null = use k(t) schedule
+  random_prompt: false              # Shuffle SSI type order
+  random_sel: false                 # Shuffle SEL entity / relation order
 
-# ---- Checkpointing ----
-save_top_k: 3                   # Keep top-k checkpoints by checkpoint_metric
-checkpoint_metric: val_f1
-checkpoint_mode: max            # Higher is better for F1
-save_last: true                 # Always keep the latest checkpoint
-checkpoint_every_n_steps: 500   # Save a resumable checkpoint every N steps (safety net)
+checkpoint:
+  save_top_k: 3                     # Keep top-k by `metric` below
+  metric: val_f1
+  mode: max                         # Higher is better for F1
+  save_last: true                   # Always keep the latest
+  every_n_steps: 500                # Resumable safety-net checkpoints
+  resume_from: null                 # Path to checkpoint dir; null = fresh start
 
-# ---- Resumption ----
-resume_from: null               # Path to checkpoint dir to resume training from (null = fresh start)
+callbacks:
+  sample_generation_interval: 12250   # Log gold vs. predicted triplets every N
 
-# ---- Callbacks ----
-sample_generation_interval: 12250  # Log predicted vs gold triplets every N steps
+wandb:
+  project: ddp-vanilla-s2g
+  entity: null                      # Your W&B team / username (or null)
+  run_name: pretrain-small-laptop   # Auto-generated if null
 
-# ---- Weights & Biases ----
-wandb_project: ddp-vanilla-s2g
-wandb_entity: null                      # Set to your W&B team/username, or null for default
-wandb_run_name: pretrain-small-laptop    # Auto-generated if null
+data:
+  data_dir: data/rebel              # Train / val / test JSONL files
+  schema_file: data/rebel/relation.schema   # One relation type per line
+  output_dir: outputs/pretrain      # Checkpoints, logs, predictions
 
-# ---- Data paths ----
-data_dir: data/rebel                       # Directory with train/val/test JSONL files
-schema_file: data/rebel/relation.schema    # One relation type per line
-output_dir: outputs/pretrain               # Checkpoints, logs, predictions
-
-# ---- Hardware ----
-num_workers: 0               # DataLoader workers PER GPU (rule of thumb: 2–4 per GPU)
-gpu_ids: null                # List of GPU indices, e.g. [0, 1, 7]. null = all available
+hardware:
+  num_workers: 0                    # DataLoader workers PER GPU
+  gpu_ids: null                     # null = all available; e.g. [0, 1, 7]

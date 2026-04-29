@@ -126,13 +126,10 @@ class S2GCollator:
     def share_step_with(self, source: "S2GCollator") -> None:
         """Link this collator's step counter to *source*.
 
-        After calling this, :attr:`current_step` reads from *source*'s
-        counter, ensuring eval and train collators stay synchronised.
-
         Args:
             source: The training collator whose step to mirror.
         """
-        self._step_source = source
+        self._current_step = source._current_step
 
     # ------------------------------------------------------------------ #
     # Negative-cap schedule                                               #
