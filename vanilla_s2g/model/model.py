@@ -139,15 +139,15 @@ class S2GModel:
         attention_mask: torch.Tensor,
         constraint_decoding: bool = False,
         source_ids: Optional[torch.Tensor] = None,
-        relation_types: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         """Run autoregressive generation with optional constraint decoding.
 
         When *constraint_decoding* is ``True``, an FSM-based
         ``LogitsProcessor`` is injected that restricts the decoder
-        vocabulary at each step.  This requires *source_ids* (for the
-        source-copy constraint) and *relation_types* (for the label trie).
+        vocabulary at each step.  This requires *source_ids*, from which
+        the constraint decoder extracts the prompted relation types
+        per batch item to build its label tries.
 
         Additional keyword arguments are forwarded to the HuggingFace
         ``model.generate()`` call (e.g. ``num_beams``, ``max_length``).
@@ -156,11 +156,11 @@ class S2GModel:
             input_ids:           Encoder input token IDs ``(batch, src_len)``.
             attention_mask:      Encoder attention mask ``(batch, src_len)``.
             constraint_decoding: Whether to activate FSM constraints.
-            source_ids:          Encoder input IDs for source-copy constraint
-                                 ``(batch, src_len)``.  Required when
-                                 *constraint_decoding* is ``True``.
-            relation_types:      List of all valid relation-type strings.
-                                 Required when *constraint_decoding* is ``True``.
+            source_ids:          Encoder input IDs for the source-copy
+                                 constraint and per-instance trie
+                                 construction ``(batch, src_len)``.
+                                 Required when *constraint_decoding* is
+                                 ``True``.
             **kwargs:            Forwarded to ``model.generate()``.
 
         Returns:
@@ -173,10 +173,9 @@ class S2GModel:
         }
 
         if constraint_decoding:
-            if source_ids is None or relation_types is None:
+            if source_ids is None:
                 raise ValueError(
-                    "constraint_decoding requires both source_ids and "
-                    "relation_types to be provided."
+                    "constraint_decoding requires source_ids to be provided."
                 )
 
             from vanilla_s2g.model.constraint_decoder import (
@@ -186,7 +185,6 @@ class S2GModel:
             processor = build_constraint_processor(
                 tokenizer=self.tokenizer,
                 source_ids=source_ids,
-                relation_types=relation_types,
                 special_tokens=self.special_tokens,
             )
             gen_kwargs["logits_processor"] = [processor]

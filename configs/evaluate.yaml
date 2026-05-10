@@ -1,0 +1,53 @@
+# =============================================================================
+# Vanilla S2G — Evaluation Configuration
+# =============================================================================
+# Loads a trained checkpoint and runs constrained generation on a given split.
+# Validated against the dataclass schema in scripts/config_utils.py.  Override
+# any nested field from the command line using OmegaConf dotlist syntax:
+#
+#   python -m vanilla_s2g.scripts.evaluate --config configs/evaluate.yaml \
+#       model.pretrained_checkpoint=outputs/pretrain/best_model \
+#       evaluation.split=test ssi.max_types_in_prompt=15
+# =============================================================================
+
+model:
+  pretrained_checkpoint: outputs/pretrain/best_model   # Trained checkpoint dir
+
+tokenization:
+  max_source_length: 300            # Encoder input budget (SSI + text)
+  max_target_length: 150            # Decoder target budget (SEL)
+
+generation:                         # Beam search at evaluation time
+  num_beams: 3
+  length_penalty: 0.0               # No bias toward long sequences
+  no_repeat_ngram_size: 0           # Same span may recur legitimately
+  early_stopping: false             # Do not truncate triplets prematurely
+  constraint_decoding: false        # FSM-based label/source-copy constraints
+
+ssi:                                # SSI cap: positives + sampled negatives <= max_types_in_prompt
+  positive_rate: 1.0                # All gold positives included (kept for collator API)
+  negative_rate: 1.0                # Unused in budget mode (kept for collator API)
+  negative_max_start: 10            # Unused in budget mode (kept for collator API)
+  negative_max_end: 10              # Unused in budget mode (kept for collator API)
+  max_types_in_prompt: 10           # HARD cap on total types prompted (positives + negatives)
+  random_prompt: false              # Deterministic SSI ordering (alphabetical)
+  random_sel: false                 # Unused at eval time (no SEL construction)
+
+evaluation:
+  split: val                        # "val" or "test"
+  mode: boundary                    # "boundary" or "strict" — metric mode
+
+validation:
+  batch_size: 32                    # Re-used as the evaluation batch size
+
+train:
+  seed: 0                           # Determines reproducibility of negative sampling
+
+data:
+  data_dir: data/rebel                            # Directory containing val.jsonl / test.jsonl
+  schema_file: data/rebel/relation.schema         # One relation type per line
+  output_dir: outputs/pretrain/eval-no-cd         # {split}_out, _preds, _results, _metrics written here
+
+hardware:
+  num_workers: 0                    # Currently unused at eval time; kept for symmetry
+  gpu_ids: null                     # null = all available; e.g. [0]

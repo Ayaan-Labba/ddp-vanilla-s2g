@@ -1,22 +1,30 @@
 """
 Evaluation script for the Vanilla S2G model.
 
-Loads a trained checkpoint, runs constrained generation on a specified
-data split, parses the SEL output, computes all metrics, and writes
-the output files specified in Section 5.2 of the documentation.
+Loads a trained checkpoint, runs (optionally constrained) generation on
+a specified data split, parses the SEL output, computes corpus-level
+metrics, and writes the output files specified in Section 5.2 of the
+documentation.
+
+The Schema-Sensitive-Input (SSI) prompt is capped to a configurable
+number of relation types, mirroring the budget-mode logic of
+:class:`~vanilla_s2g.data.S2GCollator` used during fine-tuning (and the
+tail end of pre-training).  All gold positives are always included; the
+remaining budget is filled with negatives sampled uniformly from the
+schema's negative pool.  Setting ``ssi.max_types_in_prompt: null``
+restores the legacy behaviour of prompting with the full schema.
 
 Usage::
 
-    python -m vanilla_s2g.scripts.evaluate \\
-        --checkpoint outputs/pretrain/best_model \\
-        --data_dir data/rebel \\
-        --schema_file data/rebel/relation.schema \\
-        --split test \\
-        --output_dir outputs/pretrain/eval \\
-        --constraint_decoding true \\
-        --eval_beams 3
+    # Standard run with the YAML defaults
+    python -m vanilla_s2g.scripts.evaluate --config configs/evaluate.yaml
 
-Output files::
+    # Override fields via dotlist
+    python -m vanilla_s2g.scripts.evaluate --config configs/evaluate.yaml \\
+        model.pretrained_checkpoint=outputs/pretrain/best_model \\
+        evaluation.split=val ssi.max_types_in_prompt=15
+
+Output files (written to ``cfg.data.output_dir``)::
 
     {split}_out.jsonl       — Generated SEL strings.
     {split}_preds.jsonl     — Parsed entities, relations, and rejected types.
@@ -26,29 +34,79 @@ Output files::
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
+import os
+import random
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
 
-from vanilla_s2g.data import S2GCollator, S2GDataset
+from vanilla_s2g.data import S2GDataset
 from vanilla_s2g.evaluation import compute_metrics
 from vanilla_s2g.linearisation import (
     add_special_tokens_to_tokenizer,
     build_encoder_input,
     extract_triplets,
-    get_token_ids,
     parse_sel,
 )
 from vanilla_s2g.model import build_constraint_processor
-from vanilla_s2g.scripts.config_utils import load_schema
+from vanilla_s2g.scripts.config_utils import load_config, load_schema
 
 logger = logging.getLogger(__name__)
+
+
+# ===================================================================== #
+#                       SSI BUDGET-MODE SAMPLING                         #
+# ===================================================================== #
+
+
+def _sample_capped_ssi_types(
+    schema: List[str],
+    instance_types: List[str],
+    max_types_in_prompt: int,
+    rng: random.Random,
+) -> List[str]:
+    """Sample SSI types so that the total prompt is capped.
+
+    Mirrors the *budget-mode* branch of
+    :meth:`vanilla_s2g.data.S2GCollator._sample_types`:
+
+    - All gold positives are always included (``positive_rate = 1.0``).
+    - Negatives are drawn uniformly from ``schema − instance_types`` to
+      fill the remaining budget ``max_types_in_prompt − len(positives)``.
+    - If gold positives alone already exceed the budget, no negatives
+      are added (positives are *not* truncated, matching the collator).
+
+    A scoped ``random.Random`` instance is used so that sampling is
+    deterministic and isolated from the global random state.
+
+    Args:
+        schema:               Full list of relation-type strings.
+        instance_types:       Gold relation types present in the instance.
+        max_types_in_prompt:  Hard cap on positives + negatives in the SSI.
+        rng:                  Scoped RNG for negative sampling.
+
+    Returns:
+        Concatenated list of positive then negative types, ready for
+        :func:`build_encoder_input`.
+    """
+    instance_set = set(instance_types)
+    negative_pool = [t for t in schema if t not in instance_set]
+
+    neg_budget = max(0, max_types_in_prompt - len(instance_types))
+    n_neg = min(neg_budget, len(negative_pool))
+    sampled_negatives = rng.sample(negative_pool, n_neg) if n_neg > 0 else []
+
+    return list(instance_types) + sampled_negatives
+
+
+# ===================================================================== #
+#                              EVALUATE                                  #
+# ===================================================================== #
 
 
 def evaluate(
@@ -62,8 +120,11 @@ def evaluate(
     eval_beams: int = 3,
     max_source_length: int = 300,
     max_target_length: int = 150,
-    batch_size: int = 8,
+    batch_size: int = 64,
     mode: str = "boundary",
+    max_types_in_prompt: Optional[int] = None,
+    random_prompt: bool = False,
+    seed: int = 0,
 ) -> Dict[str, float]:
     """Run full evaluation and write output files.
 
@@ -80,6 +141,14 @@ def evaluate(
         max_target_length:   Decoder max length.
         batch_size:          Inference batch size.
         mode:                ``"boundary"`` or ``"strict"``.
+        max_types_in_prompt: If set, cap the SSI to this many total types
+                             per instance (positives + sampled negatives).
+                             ``None`` reproduces the legacy full-schema
+                             behaviour.
+        random_prompt:       Shuffle SSI type order (otherwise sorted
+                             alphabetically by :func:`build_ssi_prefix`).
+        seed:                Seed for the deterministic negative-sampling
+                             RNG.
 
     Returns:
         Dictionary of evaluation metrics.
@@ -87,6 +156,22 @@ def evaluate(
     output_dir.mkdir(parents=True, exist_ok=True)
     device = next(model.parameters()).device
     model.eval()
+
+    # Scoped RNG: independent of the global random state, so the
+    # negative-sample sequence is reproducible across runs given the
+    # same seed regardless of what other library code may have done.
+    rng = random.Random(seed)
+
+    if max_types_in_prompt is not None:
+        logger.info(
+            "SSI capped at %d types per instance (gold positives + sampled negatives).",
+            max_types_in_prompt,
+        )
+    else:
+        logger.info(
+            "SSI cap disabled — prompting with the full schema (%d types).",
+            len(schema),
+        )
 
     # Prepare output file handles.
     out_path = output_dir / f"{split}_out.jsonl"
@@ -110,11 +195,33 @@ def evaluate(
             end_idx = min(start_idx + batch_size, num_instances)
             batch_instances = [dataset[i] for i in range(start_idx, end_idx)]
 
-            # Build encoder inputs with full schema.
-            encoder_texts = [
-                build_encoder_input(schema, inst["text"], random_prompt=False)
-                for inst in batch_instances
-            ]
+            # Build encoder inputs.  When the cap is enabled, each
+            # instance's SSI contains its gold positives plus a separate
+            # uniform sample of negatives drawn from the schema's
+            # negative pool; otherwise the full schema is used.  In
+            # either case the constraint decoder will later read the
+            # prompted types straight out of ``source_ids`` and restrict
+            # decoding accordingly, so no separate bookkeeping of
+            # per-instance label lists is needed here.
+            if max_types_in_prompt is not None:
+                encoder_texts = [
+                    build_encoder_input(
+                        _sample_capped_ssi_types(
+                            schema=schema,
+                            instance_types=inst["types"],
+                            max_types_in_prompt=max_types_in_prompt,
+                            rng=rng,
+                        ),
+                        inst["text"],
+                        random_prompt=random_prompt,
+                    )
+                    for inst in batch_instances
+                ]
+            else:
+                encoder_texts = [
+                    build_encoder_input(schema, inst["text"], random_prompt=random_prompt)
+                    for inst in batch_instances
+                ]
 
             encoded = tokenizer(
                 encoder_texts,
@@ -137,12 +244,17 @@ def evaluate(
                 "early_stopping": False,
             }
 
-            # Constraint decoding.
+            # Constraint decoding.  The processor reads the prompted
+            # relation types directly out of ``input_ids`` (one trie
+            # pair per batch item), so the decoder is restricted to
+            # exactly the labels that appear in each instance's SSI.
+            # The source-copy constraint also uses ``input_ids``, so
+            # both halves of the FSM stay consistent with whatever the
+            # encoder saw.
             if constraint_decoding:
                 processor = build_constraint_processor(
                     tokenizer=tokenizer,
                     source_ids=input_ids,
-                    relation_types=schema,
                     num_beams=eval_beams,
                 )
                 gen_kwargs["logits_processor"] = [processor]
@@ -227,7 +339,7 @@ def _clean_decoded(text: str, tokenizer) -> str:
 
 
 # ===================================================================== #
-#                            MAIN                                        #
+#                                MAIN                                    #
 # ===================================================================== #
 
 
@@ -237,62 +349,74 @@ def main() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="Evaluate a trained S2G model.")
-    parser.add_argument("--checkpoint", type=str, required=True,
-                        help="Path to the model checkpoint directory.")
-    parser.add_argument("--data_dir", type=str, required=True,
-                        help="Directory containing the JSONL data files.")
-    parser.add_argument("--schema_file", type=str, required=True,
-                        help="Path to the relation.schema file.")
-    parser.add_argument("--split", type=str, default="test",
-                        choices=["val", "test"],
-                        help="Which split to evaluate on.")
-    parser.add_argument("--output_dir", type=str, default="outputs/eval",
-                        help="Directory for output files.")
-    parser.add_argument("--constraint_decoding", type=str, default="true",
-                        help="Enable FSM constraint decoding (true/false).")
-    parser.add_argument("--eval_beams", type=int, default=3)
-    parser.add_argument("--max_source_length", type=int, default=300)
-    parser.add_argument("--max_target_length", type=int, default=150)
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--mode", type=str, default="boundary",
-                        choices=["boundary", "strict"],
-                        help="Metric mode.")
-    args = parser.parse_args()
+    # ---- 1. Load configuration ----
+    cfg = load_config()
+    logger.info("Configuration loaded: %s", cfg.config_path)
 
-    # Load model and tokeniser.
-    logger.info("Loading model from %s", args.checkpoint)
-    tokenizer = AutoTokenizer.from_pretrained(args.checkpoint)
-    model = AutoModelForSeq2SeqLM.from_pretrained(args.checkpoint)
+    # ---- 2. GPU and seed setup ----
+    if cfg.hardware.gpu_ids is not None:
+        gpu_str = ",".join(str(g) for g in cfg.hardware.gpu_ids)
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_str
+        logger.info("CUDA_VISIBLE_DEVICES set to: %s", gpu_str)
 
-    # Ensure special tokens are registered (they should already be in the
-    # saved tokenizer, but this is a safety net).
+    set_seed(cfg.train.seed)
+    logger.info("Random seed set to %d", cfg.train.seed)
+
+    # ---- 3. Resolve checkpoint path ----
+    checkpoint = cfg.model.pretrained_checkpoint
+    if checkpoint is None:
+        raise ValueError(
+            "model.pretrained_checkpoint is required for evaluation. "
+            "Set it in the YAML or via "
+            "'model.pretrained_checkpoint=<path>' on the CLI."
+        )
+
+    # ---- 4. Load model and tokeniser ----
+    logger.info("Loading model from %s", checkpoint)
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+    model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint)
+
+    # Ensure special tokens are registered (they should already be in
+    # the saved tokenizer, but this is a safety net).
     add_special_tokens_to_tokenizer(tokenizer, model)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     logger.info("Model loaded on %s", device)
 
-    # Load data and schema.
-    schema = load_schema(args.schema_file)
-    split_file = {"val": "val.jsonl", "test": "test.jsonl"}[args.split]
-    dataset = S2GDataset(Path(args.data_dir) / split_file)
+    # ---- 5. Load data and schema ----
+    schema = load_schema(cfg.data.schema_file)
+    logger.info("Loaded schema with %d relation types.", len(schema))
 
-    # Run evaluation.
-    constraint_flag = args.constraint_decoding.lower() in ("true", "1", "yes")
+    split = cfg.evaluation.split
+    if split not in ("val", "test"):
+        raise ValueError(
+            f"evaluation.split must be 'val' or 'test', got '{split}'."
+        )
+    split_file = {"val": "val.jsonl", "test": "test.jsonl"}[split]
+    dataset = S2GDataset(
+        Path(cfg.data.data_dir) / split_file,
+        seed=cfg.train.seed,
+    )
+    logger.info("%s set: %d instances", split, len(dataset))
+
+    # ---- 6. Run evaluation ----
     evaluate(
         model=model,
         tokenizer=tokenizer,
         dataset=dataset,
         schema=schema,
-        output_dir=Path(args.output_dir),
-        split=args.split,
-        constraint_decoding=constraint_flag,
-        eval_beams=args.eval_beams,
-        max_source_length=args.max_source_length,
-        max_target_length=args.max_target_length,
-        batch_size=args.batch_size,
-        mode=args.mode,
+        output_dir=Path(cfg.data.output_dir),
+        split=split,
+        constraint_decoding=cfg.generation.constraint_decoding,
+        eval_beams=cfg.generation.num_beams,
+        max_source_length=cfg.tokenization.max_source_length,
+        max_target_length=cfg.tokenization.max_target_length,
+        batch_size=cfg.validation.batch_size,
+        mode=cfg.evaluation.mode,
+        max_types_in_prompt=cfg.ssi.max_types_in_prompt,
+        random_prompt=cfg.ssi.random_prompt,
+        seed=cfg.train.seed,
     )
 
 

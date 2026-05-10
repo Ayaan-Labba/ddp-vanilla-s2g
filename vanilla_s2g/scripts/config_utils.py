@@ -166,6 +166,18 @@ class HardwareConfig:
 
 
 @dataclass
+class EvaluationConfig:
+    """Final-evaluation settings (consumed by ``evaluate.py``).
+
+    Only ``evaluate.py`` reads this section; ``pretrain.py`` and
+    ``finetune.py`` ignore it.  Fields kept here are those that have no
+    natural home in the existing training-oriented sections.
+    """
+    split: str = "test"                 # "val" or "test"
+    mode: str = "boundary"              # "boundary" or "strict" — metric mode
+
+
+@dataclass
 class S2GConfig:
     """Top-level config, aggregating every nested subsection."""
     model: ModelConfig = field(default_factory=ModelConfig)
@@ -182,6 +194,7 @@ class S2GConfig:
     wandb: WandbConfig = field(default_factory=WandbConfig)
     data: DataConfig = field(default_factory=DataConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     # Provenance: filled in by load_config().
     config_path: Optional[str] = None
 

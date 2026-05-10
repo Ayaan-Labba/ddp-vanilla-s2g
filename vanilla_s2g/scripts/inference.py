@@ -105,10 +105,13 @@ def extract(
     }
 
     if constraint_decoding:
+        # The constraint processor reads the prompted relation types
+        # directly from ``input_ids`` (one trie pair per batch item),
+        # so it is automatically consistent with whatever was placed
+        # into the SSI above — no need to pass the type list again.
         processor = build_constraint_processor(
             tokenizer=tokenizer,
             source_ids=input_ids,
-            relation_types=types_in_scope,
             num_beams=num_beams,
         )
         gen_kwargs["logits_processor"] = [processor]
