@@ -17,8 +17,8 @@ model:
   name: google/flan-t5-small        # Pre-trained Flan-T5 variant (60M params)
 
 tokenization:
-  max_source_length: 300            # Encoder input budget (SSI + text)
-  max_target_length: 150            # Decoder target budget (SEL)
+  max_source_length: 512            # Encoder input budget (SSI + text)
+  max_target_length: 512            # Decoder target budget (SEL)
 
 optimizer:                          # AdamW
   lr: 1e-4
@@ -46,19 +46,21 @@ validation:
   early_stopping_patience: 12       # In validation checks, not steps
   early_stopping_metric: val_f1
 
-generation:                         # Beam search at validation
-  num_beams: 3
+generation:                         
+  num_beams: 1                      # Beam search at validation
   length_penalty: 0.0               # No bias toward long sequences
   no_repeat_ngram_size: 0           # Same span may recur legitimately
   early_stopping: false             # Do not truncate triplets prematurely
   constraint_decoding: false        # Disabled during pre-training
 
 ssi:                                # Schema-Sensitive-Input dynamic construction
-  positive_rate: 0.9                # Bernoulli prob. for each positive type
-  negative_rate: 0.1                # Bernoulli prob. for each sampled negative
-  negative_max_start: 1             # k(0): max negatives at training start
-  negative_max_end: 10              # k(T): max negatives at training end
-  max_types_in_prompt: null         # null = use k(t) schedule
+  positive_rate_start: 0.9          # Bernoulli prob. for positives at step 0
+  positive_rate_end: 0.9            # Bernoulli prob. for positives at step T
+  negative_rate_start: 0.3          # Bernoulli prob. for selected negatives at step 0
+  negative_rate_end: 0.3            # Bernoulli prob. for selected negatives at step T
+  negative_max_start: 10            # k(0): max negatives drawn from pool at training start
+  negative_max_end: 10              # k(T): max negatives drawn from pool at training end
+  max_types_in_prompt: 10           # Hard cap on SSI prompt size; clamps k(t) when it would overflow
   random_prompt: false              # Shuffle SSI type order
   random_sel: false                 # Shuffle SEL entity / relation order
 
@@ -85,4 +87,5 @@ data:
 
 hardware:
   num_workers: 0                    # DataLoader workers PER GPU
+  persistent_workers: true          # Avoid re-forking workers each epoch
   gpu_ids: null                     # null = all available; e.g. [0, 1, 7]

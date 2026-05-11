@@ -91,7 +91,7 @@ class ValidationConfig:
     """Validation loop and early stopping."""
     check_interval: int = 6125
     percent_check: float = 0.1
-    batch_size: int = 32               # Per-device eval batch size
+    batch_size: int = 32                    # Per-device eval batch size
     early_stopping_patience: int = 12
     early_stopping_metric: str = "val_f1"
 
@@ -108,12 +108,28 @@ class GenerationConfig:
 
 @dataclass
 class SSIConfig:
-    """Schema-Sensitive-Input dynamic construction."""
-    positive_rate: float = 0.9
-    negative_rate: float = 0.1
+    """Schema-Sensitive-Input dynamic construction.
+
+    Pretraining (``mode='schedule'``) uses linear schedules for the
+    positive rate, negative rate, and negative cap.  When start equals
+    end on a given schedule, the calculation is short-circuited and the
+    end value is used directly.  ``max_types_in_prompt``, when set, acts
+    as a hard upper bound on the SSI prompt size and clamps the negative
+    cap to ``max_types_in_prompt - num_pos_types`` whenever the k(t)
+    schedule would otherwise exceed it.
+
+    Validation, fine-tuning, and final evaluation (``mode='budget'``)
+    ignore the rate and schedule fields; they always include every gold
+    positive and fill the SSI with uniformly sampled negatives up to
+    ``max_types_in_prompt``.
+    """
+    positive_rate_start: float = 0.9
+    positive_rate_end: float = 0.9
+    negative_rate_start: float = 0.1
+    negative_rate_end: float = 0.1
     negative_max_start: int = 1                # k(0)
     negative_max_end: int = 20                 # k(T)
-    max_types_in_prompt: Optional[int] = None  # null = use k(t) schedule
+    max_types_in_prompt: Optional[int] = None  # null = no prompt-size cap
     random_prompt: bool = False
     random_sel: bool = False
 
@@ -162,6 +178,7 @@ class DataConfig:
 class HardwareConfig:
     """GPU selection and dataloader workers."""
     num_workers: int = 0
+    persistent_workers: bool = False
     gpu_ids: Optional[List[int]] = None
 
 

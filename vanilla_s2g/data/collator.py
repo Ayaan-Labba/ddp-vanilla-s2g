@@ -2,47 +2,27 @@
 S2G Data Collator — dynamic SSI construction with type sampling.
 
 The collator is the bridge between raw dataset instances and the
-tokenised tensors consumed by the model.  For each instance in a batch,
-it performs the following steps:
+tokenised tensors consumed by the model.  Two modes are supported:
 
-1. **Positive sampling** — each ground-truth relation type is
-   independently included with probability ``positive_rate``.  Types
-   that are withheld have their ``<rel>`` blocks removed from the
-   target SEL (but their entities are retained).
+- **``schedule`` mode** (pretraining): linear schedules for the positive
+  rate, negative rate, and negative cap k(t).  Each schedule
+  short-circuits to its end value when start equals end, so a constant
+  rate does not pay the per-batch interpolation cost.  ``max_types_in_prompt``,
+  when set, acts as a hard upper bound on the SSI prompt and clamps the
+  k(t) cap to ``max_types_in_prompt - num_pos_types`` whenever the
+  schedule would otherwise overflow the prompt budget.
 
-2. **Negative sampling** — negative types are drawn from the schema's
-   pool (types absent from the current instance).  The number is
-   controlled by one of two mechanisms:
-
-   - **k(t) schedule** (pre-training): up to *k(t)* negatives are
-     selected, where *k* increases linearly from ``negative_max_start``
-     to ``negative_max_end`` over the course of training.  Each selected
-     negative is independently sampled with probability ``negative_rate``.
-
-   - **max_types_in_prompt** (fine-tuning): negatives are sampled to
-     fill the SSI up to a fixed total of ``max_types_in_prompt`` types
-     (positives + negatives).  This reflects the model's context-window
-     constraint (~30 types).
-
-3. **SSI construction** — the sampled positive and negative types are
-   combined into the SSI prefix, and the full encoder input is built.
-
-4. **Tokenisation** — encoder inputs and decoder targets are tokenised,
-   padded, and returned as a batch dict ready for the model.
+- **``budget`` mode** (validation / fine-tuning / final evaluation):
+  every gold positive is retained and the SSI is filled with uniformly
+  sampled negatives up to ``max_types_in_prompt``.  No rate fields are
+  read; budget mode is step-independent and exactly mirrors the
+  inference-time SSI construction in ``evaluate.py``.
 
 The current training step is maintained by a
 :class:`~vanilla_s2g.evaluation.callbacks.StepTrackingCallback` that
-sets :attr:`current_step` after each optimiser step.  Because PyTorch
-DataLoader workers only run ``Dataset.__getitem__`` — the
-``collate_fn`` executes in the main process — step updates are always
-visible to the collator.
-
-**Step sharing for eval collators:** During pre-training, the eval
-collator must use the same *k(t)* cap as the training collator.  Rather
-than maintaining its own step counter, it can share a reference to the
-train collator's step via :meth:`share_step_with`.  This ensures that
-validation uses the same number of distractors the model has been
-trained to handle at that point.
+sets :attr:`current_step` after each optimiser step.  Step sharing is
+retained for any external use, but the eval collator no longer needs
+it (budget mode does not consult the step counter).
 """
 
 from __future__ import annotations
@@ -64,28 +44,28 @@ from vanilla_s2g.linearisation import (
 class S2GCollator:
     """Data collator with dynamic SSI and type-sampling logic.
 
-    Args:
-        tokenizer:  HuggingFace tokeniser with S2G special tokens registered.
-        schema:     Complete list of relation-type strings for the dataset.
-        config:     Dict-like configuration with the keys documented below.
+    Required config keys (both modes)::
 
-    Required config keys::
+        mode                  – "schedule" | "budget"
+        max_source_length     – int
+        max_target_length     – int
+        random_prompt         – bool
+        random_sel            – bool
 
-        max_source_length    – int            (encoder token limit)
-        max_target_length    – int            (decoder token limit)
-        max_steps            – int            (total training steps, for schedule)
-        positive_rate        – float          (Bernoulli prob. for positive types)
-        negative_rate        – float          (Bernoulli prob. for selected negatives)
-        negative_max_start   – int            (k at step 0)
-        negative_max_end     – int            (k at step T)
-        random_prompt        – bool           (shuffle SSI type order)
-        random_sel           – bool           (shuffle entity/relation order in SEL)
+    Required in ``schedule`` mode::
 
-    Optional config keys::
+        max_steps             – int
+        positive_rate_start   – float
+        positive_rate_end     – float
+        negative_rate_start   – float
+        negative_rate_end     – float
+        negative_max_start    – int
+        negative_max_end      – int
+        max_types_in_prompt   – int or None  (None = no prompt-size cap)
 
-        max_types_in_prompt  – int or None    (cap on total types in the SSI;
-                                               when set, negatives fill up to
-                                               this limit.  Default: None.)
+    Required in ``budget`` mode::
+
+        max_types_in_prompt   – int          (must be set)
     """
 
     def __init__(
@@ -99,10 +79,21 @@ class S2GCollator:
         self.schema_set: Set[str] = set(schema)
         self.config = config
 
+        self.mode = config.get("mode", "schedule")
+        if self.mode not in ("schedule", "budget"):
+            raise ValueError(
+                f"Unknown collator mode '{self.mode}'. "
+                "Expected 'schedule' or 'budget'."
+            )
+        if self.mode == "budget" and config.get("max_types_in_prompt") is None:
+            raise ValueError(
+                "Budget mode requires 'max_types_in_prompt' to be set."
+            )
+
         # Mutable step counter, updated by StepTrackingCallback.
-        self._current_step = multiprocessing.Value('i', 0)
+        self._current_step = multiprocessing.Value("i", 0)
         # Optional reference to another collator's step (for eval sharing).
-        self._step_source: Optional[S2GCollator] = None
+        self._step_source: Optional["S2GCollator"] = None
 
     # ------------------------------------------------------------------ #
     # Step tracking interface                                             #
@@ -110,11 +101,7 @@ class S2GCollator:
 
     @property
     def current_step(self) -> int:
-        """Current global training step.
-
-        If :meth:`share_step_with` was called, reads from the source
-        collator instead.
-        """
+        """Current global training step (read from source if shared)."""
         if self._step_source is not None:
             return self._step_source.current_step
         return self._current_step.value
@@ -124,36 +111,42 @@ class S2GCollator:
         self._current_step.value = value
 
     def share_step_with(self, source: "S2GCollator") -> None:
-        """Link this collator's step counter to *source*.
-
-        Args:
-            source: The training collator whose step to mirror.
-        """
+        """Link this collator's step counter to *source*."""
         self._current_step = source._current_step
 
     # ------------------------------------------------------------------ #
-    # Negative-cap schedule                                               #
+    # Linear schedules                                                    #
     # ------------------------------------------------------------------ #
 
-    def _compute_neg_cap(self) -> int:
-        """Compute the maximum number of negative types at the current step.
-
-        Implements the linear schedule::
-
-            k(t) = k_start + floor((k_end - k_start) * t / T)
-
-        Returns:
-            Maximum number of negative types to select from the schema.
-        """
-        t = self.current_step
+    def _progress(self) -> float:
+        """Linear progress in [0, 1] across training."""
         total = self.config["max_steps"]
+        if total <= 0:
+            return 1.0
+        return min(self.current_step / total, 1.0)
+
+    def _compute_pos_rate(self, progress: float) -> float:
+        """Linear schedule for ``positive_rate``; short-circuits when flat."""
+        s = self.config["positive_rate_start"]
+        e = self.config["positive_rate_end"]
+        if s == e:
+            return e
+        return s + (e - s) * progress
+
+    def _compute_neg_rate(self, progress: float) -> float:
+        """Linear schedule for ``negative_rate``; short-circuits when flat."""
+        s = self.config["negative_rate_start"]
+        e = self.config["negative_rate_end"]
+        if s == e:
+            return e
+        return s + (e - s) * progress
+
+    def _compute_neg_cap(self, progress: float) -> int:
+        """Linear schedule k(t) for the negative cap; short-circuits when flat."""
         k_start = self.config["negative_max_start"]
         k_end = self.config["negative_max_end"]
-
-        if total <= 0:
+        if k_start == k_end:
             return k_end
-
-        progress = min(t / total, 1.0)
         return k_start + int((k_end - k_start) * progress)
 
     # ------------------------------------------------------------------ #
@@ -164,75 +157,84 @@ class S2GCollator:
         self,
         instance_types: List[str],
     ) -> tuple[List[str], List[str]]:
-        """Sample positive and negative relation types for one instance.
+        """Dispatch to the active mode's sampler."""
+        if self.mode == "budget":
+            return self._sample_types_budget(instance_types)
+        return self._sample_types_schedule(instance_types)
 
-        **Positive sampling:**  Each type in *instance_types* is
-        independently included with probability ``positive_rate``.  If all
-        types are withheld (unlikely but possible), one is retained at
-        random to avoid a degenerate training signal.
+    def _sample_types_schedule(
+        self,
+        instance_types: List[str],
+    ) -> tuple[List[str], List[str]]:
+        """Schedule-mode sampling for pretraining.
 
-        **Negative sampling** operates in one of two modes:
+        Computes the three schedules at the current step (each may be
+        constant), then:
 
-        - **k(t) mode** (``max_types_in_prompt`` is ``None``):  Up to
-          *k(t)* types are selected uniformly from the schema's negative
-          pool.  Each selected type is then independently sampled with
-          probability ``negative_rate``.
-
-        - **Budget mode** (``max_types_in_prompt`` is set):  Negatives
-          are sampled to fill the SSI up to a total of
-          ``max_types_in_prompt`` types.  The number of negatives is
-          ``max(0, budget - len(sampled_positives))``.  All drawn
-          negatives are included (no Bernoulli sub-sampling), since
-          the budget already limits the count.
-
-        Args:
-            instance_types: Relation types present in this instance.
-
-        Returns:
-            ``(sampled_positives, sampled_negatives)``
+        1. Bernoulli-samples positives at ``pos_rate``.  If all positives
+           are withheld, retains one at random to avoid a degenerate
+           training signal.
+        2. Computes the effective negative cap as
+           ``min(k(t), max_types_in_prompt - num_pos_types)`` when
+           ``max_types_in_prompt`` is set, else ``k(t)``.  This is the
+           "k(t) > max_types_in_prompt" clamp described in the spec:
+           when the k(t) schedule would overflow the prompt budget, the
+           negative count is capped at the remaining budget.
+        3. Draws that many negatives uniformly from the pool, then
+           Bernoulli sub-samples them at ``neg_rate``.
         """
-        pos_rate = self.config["positive_rate"]
-        neg_rate = self.config["negative_rate"]
+        progress = self._progress()
+        pos_rate = self._compute_pos_rate(progress)
+        neg_rate = self._compute_neg_rate(progress)
+        neg_max = self._compute_neg_cap(progress)
         max_types = self.config.get("max_types_in_prompt", None)
 
         # --- Positive sampling ---
         instance_set = set(instance_types)
         sampled_pos = [t for t in instance_types if random.random() < pos_rate]
-
-        # Safety net: keep at least one positive type if any exist.
         if instance_types and not sampled_pos:
             sampled_pos = [random.choice(instance_types)]
 
+        # --- Negative cap, with budget clamp ---
+        if max_types is not None:
+            budget_remaining = max(0, max_types - len(sampled_pos))
+            neg_max = min(neg_max, budget_remaining)
+
         # --- Negative sampling ---
         negative_pool = [t for t in self.schema if t not in instance_set]
-
-        if max_types is not None:
-            # Budget mode: fill up to max_types total.
-            neg_budget = max(0, max_types - len(sampled_pos))
-            n_neg = min(neg_budget, len(negative_pool))
-            sampled_neg = random.sample(negative_pool, n_neg) if n_neg > 0 else []
-        else:
-            # k(t) schedule mode.
-            k = min(self._compute_neg_cap(), len(negative_pool))
-            selected_negatives = random.sample(negative_pool, k) if k > 0 else []
-            sampled_neg = [t for t in selected_negatives if random.random() < neg_rate]
+        k = min(neg_max, len(negative_pool))
+        selected_negatives = random.sample(negative_pool, k) if k > 0 else []
+        sampled_neg = [t for t in selected_negatives if random.random() < neg_rate]
 
         return sampled_pos, sampled_neg
+
+    def _sample_types_budget(
+        self,
+        instance_types: List[str],
+    ) -> tuple[List[str], List[str]]:
+        """Budget-mode sampling, mirroring the test-time setup.
+
+        Includes every gold positive and fills the SSI with negatives
+        uniformly drawn from the pool up to ``max_types_in_prompt``.
+        Positives are never truncated; if they alone meet or exceed the
+        budget, no negatives are added.
+        """
+        max_types = self.config["max_types_in_prompt"]
+        instance_set = set(instance_types)
+        negative_pool = [t for t in self.schema if t not in instance_set]
+
+        neg_budget = max(0, max_types - len(instance_types))
+        n_neg = min(neg_budget, len(negative_pool))
+        sampled_neg = random.sample(negative_pool, n_neg) if n_neg > 0 else []
+
+        return list(instance_types), sampled_neg
 
     # ------------------------------------------------------------------ #
     # Collation                                                           #
     # ------------------------------------------------------------------ #
 
     def __call__(self, batch: List[Dict]) -> Dict[str, Any]:
-        """Collate a list of raw instances into a tokenised model batch.
-
-        Args:
-            batch: List of instance dicts from :class:`S2GDataset`.
-
-        Returns:
-            Dictionary with ``input_ids``, ``attention_mask``, and
-            ``labels`` tensors ready for the seq2seq model.
-        """
+        """Collate a list of raw instances into a tokenised model batch."""
         encoder_inputs: List[str] = []
         decoder_targets: List[str] = []
 
@@ -244,31 +246,17 @@ class S2GCollator:
         return self._tokenize_batch(encoder_inputs, decoder_targets)
 
     def _prepare_instance(self, instance: Dict) -> tuple[str, str]:
-        """Build the encoder input and decoder target for a single instance.
-
-        Applies positive/negative sampling, entity-block filtering, and
-        SSI/SEL construction.
-
-        Args:
-            instance: Raw dict from the dataset.
-
-        Returns:
-            ``(encoder_input_str, decoder_target_str)``
-        """
+        """Build the encoder input and decoder target for a single instance."""
         instance_types: List[str] = instance["types"]
 
-        # 1. Sample types.
         sampled_pos, sampled_neg = self._sample_types(instance_types)
         sampled_pos_set: Set[str] = set(sampled_pos)
 
-        # 2. Build entity blocks from the instance data and filter
-        #    relations to only the sampled positive types.
         entity_blocks = organize_by_entity(
             instance["entities"], instance["relations"]
         )
         filtered_blocks = filter_entity_blocks(entity_blocks, sampled_pos_set)
 
-        # 3. Build SSI (sampled positives + sampled negatives).
         ssi_types = sampled_pos + sampled_neg
         encoder_input = build_encoder_input(
             ssi_types,
@@ -276,7 +264,6 @@ class S2GCollator:
             random_prompt=self.config["random_prompt"],
         )
 
-        # 4. Build SEL target with null blocks for sampled negatives.
         decoder_target = build_sel(
             filtered_blocks,
             rejected_types=sampled_neg,
@@ -290,22 +277,10 @@ class S2GCollator:
         encoder_inputs: List[str],
         decoder_targets: List[str],
     ) -> Dict[str, Any]:
-        """Tokenise and pad encoder inputs and decoder targets.
-
-        Padding tokens in the labels are replaced with ``-100`` so that
-        they are ignored by the cross-entropy loss.
-
-        Args:
-            encoder_inputs:  List of SSI + text strings.
-            decoder_targets: List of SEL target strings.
-
-        Returns:
-            Dict with ``input_ids``, ``attention_mask``, ``labels``.
-        """
+        """Tokenise and pad encoder inputs and decoder targets."""
         max_src = self.config["max_source_length"]
         max_tgt = self.config["max_target_length"]
 
-        # Tokenise encoder inputs.
         model_inputs = self.tokenizer(
             encoder_inputs,
             max_length=max_src,
@@ -314,7 +289,6 @@ class S2GCollator:
             return_tensors="pt",
         )
 
-        # Tokenise decoder targets.
         labels = self.tokenizer(
             decoder_targets,
             max_length=max_tgt,
@@ -323,7 +297,6 @@ class S2GCollator:
             return_tensors="pt",
         )
 
-        # Replace padding token IDs with -100 for loss masking.
         label_ids = labels["input_ids"].clone()
         label_ids[label_ids == self.tokenizer.pad_token_id] = -100
         model_inputs["labels"] = label_ids

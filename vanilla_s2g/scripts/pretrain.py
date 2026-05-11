@@ -276,40 +276,43 @@ def main() -> None:
     )
 
     # ---- 6. Create collators (train + eval) ----
-    # The collator API still takes a flat dict, so we project the
-    # relevant nested fields into the shape it expects.  Doing this
-    # explicitly keeps the boundary between "config schema" and
-    # "internal data structure" clear.
+    # The collator API takes a flat dict, so we project the relevant
+    # nested fields into the shape it expects.  Doing this explicitly
+    # keeps the boundary between "config schema" and "internal data
+    # structure" clear.
+
+    # Train collator: schedule mode.  Linear schedules for pos_rate,
+    # neg_rate, and k(t); max_types_in_prompt clamps k(t) when the
+    # schedule would overflow the prompt budget.
     train_collator_config = {
+        "mode": "schedule",
         "max_source_length": cfg.tokenization.max_source_length,
         "max_target_length": cfg.tokenization.max_target_length,
         "max_steps": cfg.train.max_steps,
-        "positive_rate": cfg.ssi.positive_rate,
-        "negative_rate": cfg.ssi.negative_rate,
+        "positive_rate_start": cfg.ssi.positive_rate_start,
+        "positive_rate_end": cfg.ssi.positive_rate_end,
+        "negative_rate_start": cfg.ssi.negative_rate_start,
+        "negative_rate_end": cfg.ssi.negative_rate_end,
         "negative_max_start": cfg.ssi.negative_max_start,
         "negative_max_end": cfg.ssi.negative_max_end,
+        "max_types_in_prompt": cfg.ssi.max_types_in_prompt,
         "random_prompt": cfg.ssi.random_prompt,
         "random_sel": cfg.ssi.random_sel,
     }
     train_collator = S2GCollator(tokenizer, schema, train_collator_config)
 
-    # Eval collator: all gold positives included, negatives capped at k(t)
-    # (same schedule as training).  Step counter is shared with the train
-    # collator so that the eval collator uses the same k(t) the model has
-    # been trained to handle at each validation check.
+    # Eval collator: budget mode, exactly mirroring evaluate.py.  All
+    # gold positives included, negatives uniformly drawn to fill
+    # max_types_in_prompt.  Step-independent, so no share_step_with.
     eval_collator_config = {
+        "mode": "budget",
         "max_source_length": cfg.tokenization.max_source_length,
         "max_target_length": cfg.tokenization.max_target_length,
-        "max_steps": cfg.train.max_steps,
-        "positive_rate": 1.0,
-        "negative_rate": 1.0,
-        "negative_max_start": cfg.ssi.negative_max_start,
-        "negative_max_end": cfg.ssi.negative_max_end,
-        "random_prompt": False,
-        "random_sel": False,
+        "max_types_in_prompt": cfg.ssi.max_types_in_prompt,
+        "random_prompt": cfg.ssi.random_prompt,
+        "random_sel": cfg.ssi.random_sel,
     }
     eval_collator = S2GCollator(tokenizer, schema, eval_collator_config)
-    eval_collator.share_step_with(train_collator)
 
     # ---- 7. Set up callbacks ----
     callbacks = []
@@ -364,6 +367,7 @@ def main() -> None:
         fp16=(cfg.train.precision == "16"),
         bf16=(cfg.train.precision == "bf16"),
         dataloader_num_workers=cfg.hardware.num_workers,
+        dataloader_persistent_workers=cfg.hardware.persistent_workers,
         seed=cfg.train.seed,
         data_seed=cfg.train.seed,
 

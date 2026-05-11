@@ -50,11 +50,7 @@ generation:
   early_stopping: false
   constraint_decoding: false        # Unconstrained during fine-tuning
 
-ssi:                                # Budget-limited during fine-tuning
-  positive_rate: 1.0                # Include all gold types
-  negative_rate: 1.0                # Include all sampled negatives
-  negative_max_start: 10            # Not used in budget mode (kept for collator API)
-  negative_max_end: 10              # Not used in budget mode
+ssi:                                # Budget mode: positives kept, negatives fill to max_types_in_prompt
   max_types_in_prompt: 10           # Total = gold positives + sampled negatives
   random_prompt: false
   random_sel: false
