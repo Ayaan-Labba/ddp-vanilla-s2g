@@ -42,6 +42,7 @@ from transformers import (
     set_seed,
 )
 from torch.optim.lr_scheduler import LambdaLR
+from torch.utils.data import Subset
 
 from vanilla_s2g.data import S2GCollator, S2GDataset
 from vanilla_s2g.evaluation import (
@@ -83,9 +84,11 @@ class S2GTrainer(Seq2SeqTrainer):
             self, 
             eval_collator=None, 
             scheduler_type: str = "inverse_sqrt",
+            train_eval_dataset=None,
             **kwargs: Any) -> None:
         self._scheduler_type = scheduler_type
         self.eval_collator = eval_collator
+        self.train_eval_dataset = train_eval_dataset
         super().__init__(**kwargs)
 
     def create_scheduler(
@@ -123,6 +126,72 @@ class S2GTrainer(Seq2SeqTrainer):
             return super().get_eval_dataloader(eval_dataset)
         finally:
             self.data_collator = original_collator
+    
+    def evaluate(
+        self,
+        eval_dataset=None,
+        ignore_keys=None,
+        metric_key_prefix: str = "eval",
+    ) -> Dict[str, float]:
+        """Evaluate on the val set and, when configured, also on a fixed train subsample.
+
+        The train-subsample pass runs only when this method is invoked with
+        the default ``metric_key_prefix='eval'`` (i.e. by the standard HF
+        Trainer validation cycle, or by an explicit external call with the
+        default prefix).  Metrics from the train subsample are prefixed
+        ``train_eval_`` so they coexist with the ``eval_`` metrics in
+        ``state.log_history`` and W&B without colliding with
+        ``metric_for_best_model='boundary_f1'`` (which HF resolves to
+        ``eval_boundary_f1`` for the early-stopping callback).
+        """
+        metrics = super().evaluate(
+            eval_dataset=eval_dataset,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+
+        if (
+            self.train_eval_dataset is not None
+            and metric_key_prefix == "eval"
+        ):
+            train_metrics = self._evaluate_train_subsample(ignore_keys=ignore_keys)
+            metrics.update(train_metrics)
+
+        return metrics
+
+    def _evaluate_train_subsample(
+        self,
+        ignore_keys: Optional[List[str]] = None,
+    ) -> Dict[str, float]:
+        """Run the eval loop on the fixed train subsample, bypassing ``on_evaluate``.
+
+        Uses the eval collator (budget-mode SSI) through
+        ``get_eval_dataloader``, making the train/val F1 gap directly
+        interpretable.  ``self.log`` is called so that metrics reach W&B
+        and ``state.log_history``, but ``on_evaluate`` callbacks are
+        deliberately *not* fired — this prevents ``EarlyStoppingCallback``
+        from emitting a "metric not found" warning for the val-only
+        ``eval_boundary_f1`` key, and avoids the early-stopping patience
+        counter from being touched by a train-side metric.
+        """
+        eval_dataloader = self.get_eval_dataloader(self.train_eval_dataset)
+
+        eval_loop = (
+            self.prediction_loop
+            if self.args.use_legacy_prediction_loop
+            else self.evaluation_loop
+        )
+
+        output = eval_loop(
+            eval_dataloader,
+            description="Train-subsample evaluation",
+            prediction_loss_only=True if self.compute_metrics is None else None,
+            ignore_keys=ignore_keys,
+            metric_key_prefix="train_eval",
+        )
+
+        self.log(output.metrics)
+        return output.metrics
 
 
 # ===================================================================== #
@@ -265,6 +334,26 @@ def main() -> None:
         "Train: %d instances, Val: %d instances",
         len(train_dataset), len(val_dataset),
     )
+
+    # Fixed train subsample for periodic train-metric computation.  Drawn
+    # once at startup with the global seed and wrapped in a Subset so we do
+    # not re-read train.jsonl from disk.  Evaluated under budget-mode SSI
+    # (same as val), making the train/val F1 gap directly comparable.
+    train_eval_dataset = None
+    if cfg.validation.train_eval_percent_check and cfg.validation.train_eval_percent_check > 0:
+        n_train_eval = max(
+            1,
+            int(len(train_dataset) * cfg.validation.train_eval_percent_check),
+        )
+        train_eval_indices = rng.choice(
+            len(train_dataset), size=n_train_eval, replace=False
+        ).tolist()
+        train_eval_dataset = Subset(train_dataset, train_eval_indices)
+        logger.info(
+            "Train-eval subsample: %d instances (%.2f%% of train)",
+            len(train_eval_dataset),
+            cfg.validation.train_eval_percent_check * 100,
+        )
 
     # ---- 5. Initialise model and tokeniser ----
     tokenizer = AutoTokenizer.from_pretrained(cfg.model.name)
@@ -417,6 +506,7 @@ def main() -> None:
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
+        train_eval_dataset=train_eval_dataset,
         data_collator=train_collator,
         eval_collator=eval_collator,
         processing_class=tokenizer,

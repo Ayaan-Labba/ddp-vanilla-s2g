@@ -42,6 +42,7 @@ train:
 validation:
   check_interval: 6125              # Validate every N training steps
   percent_check: 0.1                # Fraction of val set used per check
+  train_eval_percent_check: 0.02    # Fraction of train set for periodic train metrics (null = disable)
   batch_size: 32                    # May exceed train batch size
   early_stopping_patience: 12       # In validation checks, not steps
   early_stopping_metric: val_f1
@@ -69,7 +70,7 @@ checkpoint:
   metric: val_f1
   mode: max                         # Higher is better for F1
   save_last: true                   # Always keep the latest
-  every_n_steps: 500                # Resumable safety-net checkpoints
+  every_n_steps: 1000               # Resumable safety-net checkpoints
   resume_from: null                 # Path to checkpoint dir; null = fresh start
 
 callbacks:
@@ -86,6 +87,6 @@ data:
   output_dir: outputs/pretrain      # Checkpoints, logs, predictions
 
 hardware:
-  num_workers: 0                    # DataLoader workers PER GPU
+  num_workers: 4                    # DataLoader workers PER GPU
   persistent_workers: true          # Avoid re-forking workers each epoch
   gpu_ids: null                     # null = all available; e.g. [0, 1, 7]

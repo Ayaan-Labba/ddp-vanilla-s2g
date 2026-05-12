@@ -62,15 +62,20 @@ _PCT_LABELS: tuple = tuple("max" if p == 100 else f"p{p}" for p in _PCTS)
 
 @dataclass
 class SplitStats:
-    """Percentile breakdown of tokenised source and target lengths for one split.
+    """Percentile breakdown of lengths and gold-type counts for one split.
 
     Attributes:
-        src: Mapping from percentile (one of :data:`_PCTS`) to source token count.
-        tgt: Mapping from percentile (one of :data:`_PCTS`) to target token count.
+        src:       Mapping from percentile (one of :data:`_PCTS`) to source token count.
+        tgt:       Mapping from percentile (one of :data:`_PCTS`) to target token count.
+        num_types: Mapping from percentile to the number of gold positive relation
+                   types present in the instance (i.e. ``len(instance["types"])``).
+                   This is independent of the SSI cap and reflects the raw label
+                   cardinality of the underlying data.
     """
 
-    src: Dict[int, int]  # e.g. {50: 47, 75: 68, 90: 89, 95: 103, 99: 138, 100: 883}
-    tgt: Dict[int, int]
+    src:       Dict[int, int]  # e.g. {50: 47, 75: 68, 90: 89, 95: 103, 99: 138, 100: 883}
+    tgt:       Dict[int, int]
+    num_types: Dict[int, int]  # e.g. {50: 1, 75: 2, 90: 3, 95: 4, 99: 7, 100: 27}
 
 
 # ===================================================================== #
@@ -135,11 +140,13 @@ def _scan_split(
         batch_size:           Number of instances tokenised per call.
 
     Returns:
-        :class:`SplitStats` with source and target percentile dicts.
+        :class:`SplitStats` with source-length, target-length, and
+        gold-type-count percentile dicts.
     """
     rng = random.Random(seed)
-    src_lens: List[int] = []
-    tgt_lens: List[int] = []
+    src_lens:  List[int] = []
+    tgt_lens:  List[int] = []
+    type_cnts: List[int] = []  # len(instance["types"]) per instance
     n = len(dataset)
 
     for start in tqdm(range(0, n, batch_size), desc=f"Scanning {split_name}"):
@@ -149,6 +156,9 @@ def _scan_split(
         sel_targets: List[str] = []
         for i in range(start, end):
             inst = dataset[i]
+            # Count gold positive types before any SSI sampling — this is a
+            # property of the raw annotation, not of the prompt budget.
+            type_cnts.append(len(inst["types"]))
             ssi_types = _sample_budget_ssi(
                 schema, inst["types"], max_types_in_prompt, rng,
             )
@@ -166,19 +176,20 @@ def _scan_split(
         src_lens.extend(len(ids) for ids in src_ids)
         tgt_lens.extend(len(ids) for ids in tgt_ids)
 
-    # Compute all percentile points in a single vectorised pass.
-    src_arr = np.array(src_lens, dtype=np.int32)
-    tgt_arr = np.array(tgt_lens, dtype=np.int32)
-
+    # Compute all percentile points in a single vectorised pass per metric.
     def _pct_dict(arr: np.ndarray) -> Dict[int, int]:
         # method='lower' ensures each returned value is an actual observed
-        # length, not a float interpolation between two adjacent values.
+        # value, not a float interpolation between two adjacent values.
         return {
             p: int(np.percentile(arr, p, method="lower"))
             for p in _PCTS
         }
 
-    return SplitStats(src=_pct_dict(src_arr), tgt=_pct_dict(tgt_arr))
+    return SplitStats(
+        src=_pct_dict(np.array(src_lens,  dtype=np.int32)),
+        tgt=_pct_dict(np.array(tgt_lens,  dtype=np.int32)),
+        num_types=_pct_dict(np.array(type_cnts, dtype=np.int32)),
+    )
 
 
 # ===================================================================== #
@@ -258,8 +269,9 @@ def main() -> None:
             for p in _PCTS
         }
 
-    overall_src = _overall("src")
-    overall_tgt = _overall("tgt")
+    overall_src       = _overall("src")
+    overall_tgt       = _overall("tgt")
+    overall_num_types = _overall("num_types")
 
     # Column width: each percentile value uses 8 characters.
     col_w = 8
@@ -268,7 +280,7 @@ def main() -> None:
     def _row(stats_dict: Dict[int, int]) -> str:
         return "".join(f"{stats_dict[p]:>{col_w}d}" for p in _PCTS)
 
-    sep = "=" * (10 + col_w * len(_PCTS))
+    sep  = "=" * (10 + col_w * len(_PCTS))
     thin = "-" * (10 + col_w * len(_PCTS))
 
     logger.info(sep)
@@ -293,6 +305,19 @@ def main() -> None:
         logger.info(f"{name:<10}{_row(stats.tgt)}")
     logger.info(thin)
     logger.info(f"{'overall':<10}{_row(overall_tgt)}")
+    logger.info(sep)
+
+    logger.info(sep)
+    logger.info(
+        "Gold positive-type count percentiles  "
+        "(raw annotation; independent of SSI cap)"
+    )
+    logger.info(thin)
+    logger.info(f"{'split':<10}{header}")
+    for name, stats in per_split.items():
+        logger.info(f"{name:<10}{_row(stats.num_types)}")
+    logger.info(thin)
+    logger.info(f"{'overall':<10}{_row(overall_num_types)}")
     logger.info(sep)
 
     logger.info(

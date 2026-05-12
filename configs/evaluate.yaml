@@ -11,7 +11,7 @@
 # =============================================================================
 
 model:
-  pretrained_checkpoint: outputs/pretrain/best_model   # Trained checkpoint dir
+  pretrained_checkpoint: outputs/pretrain/checkpoint-best_model   # Trained checkpoint dir
 
 tokenization:
   max_source_length: 300            # Encoder input budget (SSI + text)
@@ -24,17 +24,13 @@ generation:                         # Beam search at evaluation time
   early_stopping: false             # Do not truncate triplets prematurely
   constraint_decoding: false        # FSM-based label/source-copy constraints
 
-ssi:                                # SSI cap: positives + sampled negatives <= max_types_in_prompt
-  positive_rate: 1.0                # All gold positives included (kept for collator API)
-  negative_rate: 1.0                # Unused in budget mode (kept for collator API)
-  negative_max_start: 10            # Unused in budget mode (kept for collator API)
-  negative_max_end: 10              # Unused in budget mode (kept for collator API)
+ssi:                                # Budget mode: positives kept, negatives fill to max_types_in_prompt
   max_types_in_prompt: 10           # HARD cap on total types prompted (positives + negatives)
   random_prompt: false              # Deterministic SSI ordering (alphabetical)
   random_sel: false                 # Unused at eval time (no SEL construction)
 
 evaluation:
-  split: val                        # "val" or "test"
+  split: test                       # "val" or "test"
   mode: boundary                    # "boundary" or "strict" — metric mode
 
 validation:
@@ -46,8 +42,8 @@ train:
 data:
   data_dir: data/rebel                            # Directory containing val.jsonl / test.jsonl
   schema_file: data/rebel/relation.schema         # One relation type per line
-  output_dir: outputs/pretrain/eval-no-cd         # {split}_out, _preds, _results, _metrics written here
+  output_dir: outputs/pretrain/eval-latest        # {split}_out, _preds, _results, _metrics written here
 
 hardware:
-  num_workers: 0                    # Currently unused at eval time; kept for symmetry
+  num_workers: 4                    # Currently unused at eval time; kept for symmetry
   gpu_ids: null                     # null = all available; e.g. [0]

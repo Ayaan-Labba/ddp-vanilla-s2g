@@ -91,7 +91,8 @@ class ValidationConfig:
     """Validation loop and early stopping."""
     check_interval: int = 6125
     percent_check: float = 0.1
-    batch_size: int = 32                    # Per-device eval batch size
+    train_eval_percent_check: Optional[float] = None    # null = disable; e.g. 0.01 = 1% of train
+    batch_size: int = 32                                # Per-device eval batch size
     early_stopping_patience: int = 12
     early_stopping_metric: str = "val_f1"
 
