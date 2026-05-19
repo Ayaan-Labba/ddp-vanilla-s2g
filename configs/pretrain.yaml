@@ -82,7 +82,7 @@ wandb:
   run_name: pretrain-large-v1       # Auto-generated if null
 
 data:
-  data_dir: data/rebel                            # Train / val / test JSONL files
+  data_dir: data/rebel_full                       # Train / val / test JSONL files
   schema_file: data/rebel_full/relation.schema    # One relation type per line
   output_dir: outputs/pretrain-large-v1           # Checkpoints, logs, predictions
 
