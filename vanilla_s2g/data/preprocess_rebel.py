@@ -353,7 +353,20 @@ def main() -> None:
         "--top_k",
         type=int,
         default=220,
-        help="Number of most-frequent relation types to retain.",
+        help=(
+            "Number of most-frequent relation types to retain. "
+            "Ignored when --all_types is set."
+        ),
+    )
+    parser.add_argument(
+        "--all_types",
+        action="store_true",
+        default=False,
+        help=(
+            "Retain every relation type found in the training split. "
+            "When set, --top_k is ignored and no instance is filtered "
+            "by relation type."
+        ),
     )
     parser.add_argument(
         "--dataset_name",
@@ -368,7 +381,6 @@ def main() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    # Ensure NLTK tokeniser data is available.
     nltk.download("punkt", quiet=True)
     nltk.download("punkt_tab", quiet=True)
 
@@ -377,26 +389,44 @@ def main() -> None:
 
     # 1. Load dataset.
     logger.info("Loading dataset: %s", args.dataset_name)
-    dataset = load_dataset(args.dataset_name, "default", revision="refs/convert/parquet")
-
-    # 2. Count relation types on the training split and select top-K.
-    type_counts = count_relation_types(dataset, split="train")
-    top_types = [t for t, _ in type_counts.most_common(args.top_k)]
-    allowed_types: Set[str] = set(top_types)
-    logger.info(
-        "Selected top-%d relation types out of %d total.",
-        args.top_k, len(type_counts),
+    dataset = load_dataset(
+        args.dataset_name, "default", revision="refs/convert/parquet"
     )
 
-    # 3. Write the relation schema file.
+    # 2. Count relation types on the training split.
+    type_counts = count_relation_types(dataset, split="train")
+
+    # 3. Select allowed types — all or top-K.
+    if args.all_types:
+        # Preserve descending-frequency order for the schema file.
+        selected_types = [t for t, _ in type_counts.most_common()]
+        logger.info(
+            "Retaining all %d relation types (--all_types set).",
+            len(selected_types),
+        )
+    else:
+        selected_types = [t for t, _ in type_counts.most_common(args.top_k)]
+        logger.info(
+            "Selected top-%d relation types out of %d total.",
+            args.top_k,
+            len(type_counts),
+        )
+
+    allowed_types: Set[str] = set(selected_types)
+
+    # 4. Write the relation schema file.
     schema_path = output_dir / "relation.schema"
     with open(schema_path, "w", encoding="utf-8") as f:
-        for t in top_types:
+        for t in selected_types:
             f.write(t + "\n")
-    logger.info("Schema written to %s (%d types).", schema_path, len(top_types))
+    logger.info("Schema written to %s (%d types).", schema_path, len(selected_types))
 
-    # 4. Process each split.
-    split_map = {"train": "train.jsonl", "validation": "val.jsonl", "test": "test.jsonl"}
+    # 5. Process each split.
+    split_map = {
+        "train": "train.jsonl",
+        "validation": "val.jsonl",
+        "test": "test.jsonl",
+    }
     for split_name, filename in split_map.items():
         if split_name not in dataset:
             logger.warning("Split %r not found in dataset; skipping.", split_name)
