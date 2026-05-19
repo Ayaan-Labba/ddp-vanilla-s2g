@@ -17,8 +17,8 @@ model:
   name: google/flan-t5-small        # Pre-trained Flan-T5 variant (60M params)
 
 tokenization:
-  max_source_length: 512            # Encoder input budget (SSI + text)
-  max_target_length: 512            # Decoder target budget (SEL)
+  max_source_length: 200            # Encoder input budget (SSI + text)
+  max_target_length: 200            # Decoder target budget (SEL)
 
 optimizer:                          # AdamW
   lr: 1e-4
@@ -33,8 +33,8 @@ scheduler:
 
 train:
   max_steps: 250000
-  batch_size: 16                    # Per-device train batch size
-  gradient_acc_steps: 2             # Effective batch: 16 × 2 = 32
+  batch_size: 8                      # Per-device train batch size
+  gradient_acc_steps: 4              # Effective batch: 16 × 2 = 32
   gradient_clip_value: 10.0
   precision: bf16                   # "16" / "bf16" / "32"
   seed: 0                           # Determines init, data shuffle, SSI sampling
@@ -43,7 +43,7 @@ validation:
   check_interval: 6125              # Validate every N training steps
   percent_check: 0.1                # Fraction of val set used per check
   train_eval_percent_check: 0.02    # Fraction of train set for periodic train metrics (null = disable)
-  batch_size: 32                    # May exceed train batch size
+  batch_size: 16                    # May exceed train batch size
   early_stopping_patience: 12       # In validation checks, not steps
   early_stopping_metric: val_f1
 
@@ -55,10 +55,10 @@ generation:
   constraint_decoding: false        # Disabled during pre-training
 
 ssi:                                # Schema-Sensitive-Input dynamic construction
-  positive_rate_start: 0.9          # Bernoulli prob. for positives at step 0
-  positive_rate_end: 0.9            # Bernoulli prob. for positives at step T
-  negative_rate_start: 0.3          # Bernoulli prob. for selected negatives at step 0
-  negative_rate_end: 0.3            # Bernoulli prob. for selected negatives at step T
+  positive_rate_start: 1.0          # Bernoulli prob. for positives at step 0
+  positive_rate_end: 1.0            # Bernoulli prob. for positives at step T
+  negative_rate_start: 1.0          # Bernoulli prob. for selected negatives at step 0
+  negative_rate_end: 1.0            # Bernoulli prob. for selected negatives at step T
   negative_max_start: 10            # k(0): max negatives drawn from pool at training start
   negative_max_end: 10              # k(T): max negatives drawn from pool at training end
   max_types_in_prompt: 10           # Hard cap on SSI prompt size; clamps k(t) when it would overflow
@@ -68,10 +68,10 @@ ssi:                                # Schema-Sensitive-Input dynamic constructio
 checkpoint:
   save_top_k: 3                     # Keep top-k by `metric` below
   metric: val_f1
-  mode: max                         # Higher is better for F1
-  save_last: true                   # Always keep the latest
-  every_n_steps: 1000               # Resumable safety-net checkpoints
-  resume_from: null                 # Path to checkpoint dir; null = fresh start
+  mode: max                                                     # Higher is better for F1
+  save_last: true                                               # Always keep the latest
+  every_n_steps: 1000                                           # Resumable safety-net checkpoints
+  resume_from: outputs/pretrain-small-v1/checkpoint-6000        # Path to checkpoint dir; null = fresh start
 
 callbacks:
   sample_generation_interval: 12250   # Log gold vs. predicted triplets every N
@@ -79,14 +79,14 @@ callbacks:
 wandb:
   project: ddp-vanilla-s2g
   entity: null                      # Your W&B team / username (or null)
-  run_name: pretrain-small-laptop   # Auto-generated if null
+  run_name: pretrain-small-v1       # Auto-generated if null
 
 data:
-  data_dir: data/rebel              # Train / val / test JSONL files
+  data_dir: data/rebel                      # Train / val / test JSONL files
   schema_file: data/rebel/relation.schema   # One relation type per line
-  output_dir: outputs/pretrain      # Checkpoints, logs, predictions
+  output_dir: outputs/pretrain-small-v1     # Checkpoints, logs, predictions
 
 hardware:
-  num_workers: 4                    # DataLoader workers PER GPU
-  persistent_workers: true          # Avoid re-forking workers each epoch
+  num_workers: 0                    # DataLoader workers PER GPU
+  persistent_workers: false         # Avoid re-forking workers each epoch
   gpu_ids: null                     # null = all available; e.g. [0, 1, 7]
