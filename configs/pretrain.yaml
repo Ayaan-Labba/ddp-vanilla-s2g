@@ -17,34 +17,35 @@ model:
   name: google/flan-t5-large        # Pre-trained Flan-T5 variant (60M params)
 
 tokenization:
-  max_source_length: 200            # Encoder input budget (SSI + text)
-  max_target_length: 200            # Decoder target budget (SEL)
+  max_source_length: 300            # Encoder input budget (SSI + text)
+  max_target_length: 300            # Decoder target budget (SEL)
 
-optimizer:                          # AdamW
-  lr: 1e-5
-  weight_decay: 0.0                 # Following REBEL
+optimizer:
+  optim: adamw_bnb_8bit                       # AdamW
+  lr: 3e-5
+  weight_decay: 0.0                 
   adam_beta1: 0.9
   adam_beta2: 0.999
   adam_epsilon: 1.0e-8
 
 scheduler:
   type: cosine
-  warmup_steps: 25000               # Linear warmup from 0 → lr
+  warmup_steps: 48000               # Linear warmup from 0 → lr
 
 train:
-  max_steps: 250000
-  batch_size: 8                      # Per-device train batch size
-  gradient_acc_steps: 4              # Effective batch: 16 × 2 = 32
-  gradient_clip_value: 10.0
+  max_steps: 480000
+  batch_size: 4                     # Per-device train batch size
+  gradient_acc_steps: 8             # Effective batch = 32
+  gradient_clip_value: 1.0
   precision: bf16                   # "16" / "bf16" / "32"
   seed: 0                           # Determines init, data shuffle, SSI sampling
 
 validation:
-  check_interval: 6125              # Validate every N training steps
-  percent_check: 0.1                # Fraction of val set used per check
-  train_eval_percent_check: 0.02    # Fraction of train set for periodic train metrics (null = disable)
-  batch_size: 16                    # May exceed train batch size
-  early_stopping_patience: 12       # In validation checks, not steps
+  check_interval: 12000               # Validate every N training steps
+  percent_check: 0.1                  # Fraction of val set used per check
+  train_eval_percent_check: 0.006     # Fraction of train set for periodic train metrics (null = disable)
+  batch_size: 8                      # May exceed train batch size
+  early_stopping_patience: 8          # In validation checks, not steps
   early_stopping_metric: val_f1
 
 generation:                         
@@ -70,11 +71,11 @@ checkpoint:
   metric: val_f1
   mode: max                                                     # Higher is better for F1
   save_last: true                                               # Always keep the latest
-  every_n_steps: 1000                                           # Resumable safety-net checkpoints
+  every_n_steps: 12000                                          # Resumable safety-net checkpoints
   resume_from: null                                             # Path to checkpoint dir; null = fresh start
 
 callbacks:
-  sample_generation_interval: 12250   # Log gold vs. predicted triplets every N
+  sample_generation_interval: 24000   # Log gold vs. predicted triplets every N
 
 wandb:
   project: ddp-vanilla-s2g
@@ -87,6 +88,7 @@ data:
   output_dir: outputs/pretrain-large-v1           # Checkpoints, logs, predictions
 
 hardware:
-  num_workers: 0                    # DataLoader workers PER GPU
-  persistent_workers: false         # Avoid re-forking workers each epoch
-  gpu_ids: null                     # null = all available; e.g. [0, 1, 7]
+  num_workers: 4                                    # DataLoader workers PER GPU
+  persistent_workers: true                          # Avoid re-forking workers each epoch
+  gpu_ids: null                                     # null = all available; e.g. [0, 1, 7]
+  deepspeed_config: configs/deepspeed_zero2.json

@@ -276,20 +276,23 @@ def main() -> None:
     logger.info("Configuration loaded: %s", cfg.config_path)
 
     # ---- 2. GPU and seed setup ----
-    # The schema enforces ``gpu_ids`` as Optional[List[int]], so the
-    # int-vs-list coercion the previous version performed is no longer
-    # necessary: the user must write ``hardware.gpu_ids=[0]`` rather
-    # than ``hardware.gpu_ids=0`` (and OmegaConf would error otherwise).
     if cfg.hardware.gpu_ids is not None:
-        gpu_str = ",".join(str(g) for g in cfg.hardware.gpu_ids)
-        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_str
-        logger.info("CUDA_VISIBLE_DEVICES set to: %s", gpu_str)
+        if int(os.environ.get("WORLD_SIZE", 1)) > 1:
+            logger.warning(
+                "hardware.gpu_ids is set but WORLD_SIZE > 1: GPU assignment is "
+                "managed by torchrun in distributed mode; gpu_ids is ignored."
+            )
+        else:
+            gpu_str = ",".join(str(g) for g in cfg.hardware.gpu_ids)
+            os.environ["CUDA_VISIBLE_DEVICES"] = gpu_str
+            logger.info("CUDA_VISIBLE_DEVICES set to: %s", gpu_str)
 
     set_seed(cfg.train.seed)
     rng = np.random.default_rng(cfg.train.seed)
     logger.info("Random seed set to %d", cfg.train.seed)
 
     # ---- 3. W&B initialisation ----
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
     wandb_run_id: Optional[str] = None
     wandb_resume: Optional[str] = None
     output_dir = Path(cfg.data.output_dir)
@@ -297,21 +300,20 @@ def main() -> None:
 
     resume_from = cfg.checkpoint.resume_from
     if resume_from is not None:
-        # Recover W&B run ID for seamless continuation.
         meta = load_run_metadata(cfg.data.output_dir)
         if meta and meta.get("wandb_run_id"):
             wandb_run_id = meta["wandb_run_id"]
             wandb_resume = "must"
             logger.info("Resuming W&B run: %s", wandb_run_id)
 
-    # Initialise wandb
-    wandb.init(
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        name=cfg.wandb.run_name,
-        id=wandb_run_id,
-        resume=wandb_resume
-    )
+    if local_rank == 0:                           
+        wandb.init(
+            project=cfg.wandb.project,
+            entity=cfg.wandb.entity,
+            name=cfg.wandb.run_name,
+            id=wandb_run_id,
+            resume=wandb_resume,
+        )
 
     # ---- 4. Load data and schema ----
     schema = load_schema(cfg.data.schema_file)
@@ -417,7 +419,7 @@ def main() -> None:
     periodic_ckpt = PeriodicCheckpointCallback(
         output_dir=cfg.data.output_dir,
         every_n_steps=cfg.checkpoint.every_n_steps,
-        wandb_run_id=wandb.run.id,
+        wandb_run_id=wandb.run.id if wandb.run is not None else None,
     )
     callbacks.append(periodic_ckpt)
 
@@ -453,10 +455,12 @@ def main() -> None:
         bf16=(cfg.train.precision == "bf16"),
         dataloader_num_workers=cfg.hardware.num_workers,
         dataloader_persistent_workers=cfg.hardware.persistent_workers,
+        deepspeed=cfg.hardware.deepspeed_config,
         seed=cfg.train.seed,
         data_seed=cfg.train.seed,
 
         # Optimiser (Trainer creates AdamW internally).
+        optim=cfg.optimizer.optim,
         learning_rate=cfg.optimizer.lr,
         weight_decay=cfg.optimizer.weight_decay,
         adam_beta1=cfg.optimizer.adam_beta1,

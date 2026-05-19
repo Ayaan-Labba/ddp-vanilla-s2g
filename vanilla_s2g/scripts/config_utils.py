@@ -60,7 +60,8 @@ class TokenizationConfig:
 
 @dataclass
 class OptimizerConfig:
-    """AdamW optimiser hyperparameters."""
+    """Optimiser type and hyperparameters."""
+    optim: str = "adamw_torch"
     lr: float = 5e-5
     weight_decay: float = 0.0
     adam_beta1: float = 0.9
@@ -181,6 +182,7 @@ class HardwareConfig:
     num_workers: int = 0
     persistent_workers: bool = False
     gpu_ids: Optional[List[int]] = None
+    deepspeed_config: Optional[str] = None
 
 
 @dataclass

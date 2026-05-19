@@ -167,6 +167,7 @@ class GenerateTextSamplesCallback(TrainerCallback):
         # Generate predictions.
         model.eval()
         with torch.no_grad():
+            unwrapped_model = model.module if hasattr(model, "module") else model
             generated_ids = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
