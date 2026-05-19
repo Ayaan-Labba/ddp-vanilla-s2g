@@ -254,9 +254,14 @@ def parse_sel(
     st = special_tokens
     special_set: Set[str] = set(st.all_tokens)
 
+    # Forcefully pad special tokens with spaces so glued tokens detach
+    padded_text = text
+    for token in special_set:
+        padded_text = padded_text.replace(token, f" {token} ")
+
     # Tokenise by whitespace.  Special tokens were added as whole tokens to
     # the vocabulary, so after decode() they appear as space-separated words.
-    words = text.strip().split()
+    words = padded_text.strip().split()
 
     # Merge consecutive non-special words into a single content token so
     # that spans like "Barack Obama" are handled naturally.  Special tokens

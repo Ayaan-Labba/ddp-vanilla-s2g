@@ -13,9 +13,15 @@ Usage (planned)::
 
     python -m vanilla_s2g.scripts.finetune \\
         --config configs/finetune.yaml \\
-        --pretrained_checkpoint outputs/pretrain/best_model \\
-        --data_dir data/conll04 \\
-        --schema_file data/conll04/relation.schema
+        model.pretrained_checkpoint=outputs/pretrain/best_model \\
+        data.data_dir=data/conll04 \\
+        data.schema_file=data/conll04/relation.schema
+
+For typed-SEL datasets, enable typed generation via the dotlist syntax::
+
+    python -m vanilla_s2g.scripts.finetune --config configs/finetune.yaml \\
+        typed_sel.enabled=true \\
+        'typed_sel.entity_types=[PER,LOC,ORG,MISC]'
 
 TODO:
     - Static SSI collator mode (all types, all negatives).

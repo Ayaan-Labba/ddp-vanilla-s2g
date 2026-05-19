@@ -3,3 +3,12 @@ data/rebel/
 
 # Environment
 vs2g-env/
+*__pycache__/
+.vscode/
+
+# Outputs
+outputs/
+
+# Monitoring
+wandb/
+tea_debug.log
