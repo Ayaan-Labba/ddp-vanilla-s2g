@@ -14,14 +14,14 @@
 # =============================================================================
 
 model:
-  name: google/flan-t5-small        # Pre-trained Flan-T5 variant (60M params)
+  name: google/flan-t5-large        # Pre-trained Flan-T5 variant (60M params)
 
 tokenization:
   max_source_length: 200            # Encoder input budget (SSI + text)
   max_target_length: 200            # Decoder target budget (SEL)
 
 optimizer:                          # AdamW
-  lr: 1e-4
+  lr: 1e-5
   weight_decay: 0.0                 # Following REBEL
   adam_beta1: 0.9
   adam_beta2: 0.999
@@ -59,9 +59,9 @@ ssi:                                # Schema-Sensitive-Input dynamic constructio
   positive_rate_end: 1.0            # Bernoulli prob. for positives at step T
   negative_rate_start: 1.0          # Bernoulli prob. for selected negatives at step 0
   negative_rate_end: 1.0            # Bernoulli prob. for selected negatives at step T
-  negative_max_start: 10            # k(0): max negatives drawn from pool at training start
-  negative_max_end: 10              # k(T): max negatives drawn from pool at training end
-  max_types_in_prompt: 10           # Hard cap on SSI prompt size; clamps k(t) when it would overflow
+  negative_max_start: 30            # k(0): max negatives drawn from pool at training start
+  negative_max_end: 30              # k(T): max negatives drawn from pool at training end
+  max_types_in_prompt: 30           # Hard cap on SSI prompt size; clamps k(t) when it would overflow
   random_prompt: false              # Shuffle SSI type order
   random_sel: false                 # Shuffle SEL entity / relation order
 
@@ -71,7 +71,7 @@ checkpoint:
   mode: max                                                     # Higher is better for F1
   save_last: true                                               # Always keep the latest
   every_n_steps: 1000                                           # Resumable safety-net checkpoints
-  resume_from: outputs/pretrain-small-v1/checkpoint-6000        # Path to checkpoint dir; null = fresh start
+  resume_from: null                                             # Path to checkpoint dir; null = fresh start
 
 callbacks:
   sample_generation_interval: 12250   # Log gold vs. predicted triplets every N
@@ -79,12 +79,12 @@ callbacks:
 wandb:
   project: ddp-vanilla-s2g
   entity: null                      # Your W&B team / username (or null)
-  run_name: pretrain-small-v1       # Auto-generated if null
+  run_name: pretrain-large-v1       # Auto-generated if null
 
 data:
-  data_dir: data/rebel                      # Train / val / test JSONL files
-  schema_file: data/rebel/relation.schema   # One relation type per line
-  output_dir: outputs/pretrain-small-v1     # Checkpoints, logs, predictions
+  data_dir: data/rebel                            # Train / val / test JSONL files
+  schema_file: data/rebel_full/relation.schema    # One relation type per line
+  output_dir: outputs/pretrain-large-v1           # Checkpoints, logs, predictions
 
 hardware:
   num_workers: 0                    # DataLoader workers PER GPU
