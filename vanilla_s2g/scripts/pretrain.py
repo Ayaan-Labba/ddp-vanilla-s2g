@@ -450,6 +450,8 @@ def main() -> None:
         max_steps=cfg.train.max_steps,
         per_device_train_batch_size=cfg.train.batch_size,
         gradient_accumulation_steps=cfg.train.gradient_acc_steps,
+        gradient_checkpointing=cfg.train.gradient_checkpointing,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         max_grad_norm=cfg.train.gradient_clip_value,
         fp16=(cfg.train.precision == "16"),
         bf16=(cfg.train.precision == "bf16"),

@@ -168,7 +168,7 @@ class GenerateTextSamplesCallback(TrainerCallback):
         model.eval()
         with torch.no_grad():
             unwrapped_model = model.module if hasattr(model, "module") else model
-            generated_ids = model.generate(
+            generated_ids = unwrapped_model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 num_beams=self.eval_beams,

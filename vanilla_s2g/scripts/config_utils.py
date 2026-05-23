@@ -83,6 +83,7 @@ class TrainConfig:
     batch_size: int = 8                 # Per-device train batch size
     gradient_acc_steps: int = 4
     gradient_clip_value: float = 10.0
+    gradient_checkpointing: bool = False
     precision: str = "bf16"             # "16", "bf16", or "32"
     seed: int = 0
 

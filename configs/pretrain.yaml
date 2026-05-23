@@ -21,7 +21,7 @@ tokenization:
   max_target_length: 300            # Decoder target budget (SEL)
 
 optimizer:
-  optim: adamw_bnb_8bit                       # AdamW
+  optim: adamw_torch                       # adamw_bnb_8bit (8-bit AdamW) to save memory
   lr: 3e-5
   weight_decay: 0.0                 
   adam_beta1: 0.9
@@ -30,22 +30,23 @@ optimizer:
 
 scheduler:
   type: cosine
-  warmup_steps: 48000               # Linear warmup from 0 → lr
+  warmup_steps: 24000               # Linear warmup from 0 → lr
 
 train:
-  max_steps: 480000
-  batch_size: 4                     # Per-device train batch size
-  gradient_acc_steps: 8             # Effective batch = 32
+  max_steps: 240000
+  batch_size: 64                     # Per-device train batch size
+  gradient_checkpointing: true
+  gradient_acc_steps: 1             # Effective batch = 64
   gradient_clip_value: 1.0
   precision: bf16                   # "16" / "bf16" / "32"
   seed: 0                           # Determines init, data shuffle, SSI sampling
 
 validation:
-  check_interval: 12000               # Validate every N training steps
+  check_interval: 6000               # Validate every N training steps
   percent_check: 0.1                  # Fraction of val set used per check
   train_eval_percent_check: 0.006     # Fraction of train set for periodic train metrics (null = disable)
-  batch_size: 8                      # May exceed train batch size
-  early_stopping_patience: 8          # In validation checks, not steps
+  batch_size: 128                      # May exceed train batch size
+  early_stopping_patience: 4          # In validation checks, not steps
   early_stopping_metric: val_f1
 
 generation:                         
@@ -71,11 +72,11 @@ checkpoint:
   metric: val_f1
   mode: max                                                     # Higher is better for F1
   save_last: true                                               # Always keep the latest
-  every_n_steps: 12000                                          # Resumable safety-net checkpoints
-  resume_from: null                                             # Path to checkpoint dir; null = fresh start
+  every_n_steps: 6000                                          # Resumable safety-net checkpoints
+  resume_from: outputs/pretrain-large-v1/checkpoint-66000      # Path to checkpoint dir; null = fresh start
 
 callbacks:
-  sample_generation_interval: 24000   # Log gold vs. predicted triplets every N
+  sample_generation_interval: 12000   # Log gold vs. predicted triplets every N
 
 wandb:
   project: ddp-vanilla-s2g
