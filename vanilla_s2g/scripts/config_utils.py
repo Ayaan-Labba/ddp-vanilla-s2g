@@ -183,7 +183,6 @@ class HardwareConfig:
     num_workers: int = 0
     persistent_workers: bool = False
     gpu_ids: Optional[List[int]] = None
-    deepspeed_config: Optional[str] = None
 
 
 @dataclass

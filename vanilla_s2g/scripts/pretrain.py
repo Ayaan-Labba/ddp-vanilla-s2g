@@ -457,7 +457,6 @@ def main() -> None:
         bf16=(cfg.train.precision == "bf16"),
         dataloader_num_workers=cfg.hardware.num_workers,
         dataloader_persistent_workers=cfg.hardware.persistent_workers,
-        deepspeed=cfg.hardware.deepspeed_config,
         seed=cfg.train.seed,
         data_seed=cfg.train.seed,
 

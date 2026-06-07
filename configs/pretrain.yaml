@@ -92,4 +92,3 @@ hardware:
   num_workers: 4                                    # DataLoader workers PER GPU
   persistent_workers: true                          # Avoid re-forking workers each epoch
   gpu_ids: null                                     # null = all available; e.g. [0, 1, 7]
-  deepspeed_config: configs/deepspeed_zero2.json
