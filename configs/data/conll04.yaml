@@ -1,0 +1,11 @@
+entities:
+  Loc: location
+  Org: organization
+  Other: other
+  Peop: person
+relations:
+  Kill: killed
+  Live_In: lives in
+  Located_In: located in
+  OrgBased_In: organization based in
+  Work_For: works for

@@ -1,0 +1,82 @@
+# =============================================================================
+# Vanilla S2G — SciERC Fine-tuning Configuration
+# =============================================================================
+
+model:
+  name: google/flan-t5-large
+  pretrained_checkpoint: null
+
+tokenization:
+  max_source_length: 512
+  max_target_length: 512
+
+optimizer:
+  optim: adamw_torch
+  lr: 3.0e-5
+  weight_decay: 0.0
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
+
+scheduler:
+  type: cosine
+  warmup_steps: 550
+
+train:
+  max_steps: 4650
+  batch_size: 4
+  gradient_acc_steps: 1
+  gradient_clip_value: 1.0
+  gradient_checkpointing: true
+  precision: 'bf16'
+  seed: 0
+
+validation:
+  check_interval: 465
+  percent_check: 1.0
+  train_eval_percent_check: 0.05
+  batch_size: 16
+  early_stopping_patience: 3
+  early_stopping_metric: val_avg_f1
+
+generation:
+  num_beams: 3
+  length_penalty: 0.0
+  no_repeat_ngram_size: 0
+  early_stopping: false
+  constraint_decoding: false
+
+ssi:
+  max_types_in_prompt: 10
+  random_prompt: false
+  random_sel: false
+
+typed_sel:
+  enabled: true
+  entity_types: [generic, material, method, metric, other scientific term, task]
+
+checkpoint:
+  save_top_k: 3
+  metric: val_avg_f1
+  mode: max
+  save_last: true
+  every_n_steps: 465
+  resume_from: null
+
+callbacks:
+  sample_generation_interval: 930
+
+wandb:
+  project: ddp-vanilla-s2g
+  entity: null
+  run_name: scierc-finetune
+
+data:
+  data_dir: data/scierc
+  schema_file: data/scierc/relation.schema
+  output_dir: outputs/finetune/scierc
+
+hardware:
+  num_workers: 4
+  persistent_workers: true
+  gpu_ids: null

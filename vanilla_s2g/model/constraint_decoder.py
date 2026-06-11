@@ -315,9 +315,26 @@ class ConstraintDecodingProcessor(LogitsProcessor):
         self.eos_id: int = tokenizer.eos_token_id
         self.pad_id: int = tokenizer.pad_token_id or 0
 
+        # Discover typed entity token IDs dynamically.
+        self.typed_ent_ids: Set[int] = set()
+        if hasattr(tokenizer, "additional_special_tokens") and tokenizer.additional_special_tokens:
+            for tok in tokenizer.additional_special_tokens:
+                if tok.startswith("<") and tok.endswith(">"):
+                    if tok not in {
+                        special_tokens.type_prompt,
+                        special_tokens.text_start,
+                        special_tokens.ent_start,
+                        special_tokens.rel_open,
+                        special_tokens.tail_start,
+                        special_tokens.reject_type,
+                    }:
+                        tok_id = tokenizer.convert_tokens_to_ids(tok)
+                        if tok_id != tokenizer.unk_token_id:
+                            self.typed_ent_ids.add(tok_id)
+
         # Structural tokens that can transition states in ENT/TAIL spans.
         self.span_exit_ids: FrozenSet[int] = frozenset(
-            {self.rel_id, self.ent_id, self.null_id, self.eos_id}
+            {self.rel_id, self.ent_id, self.null_id, self.eos_id} | self.typed_ent_ids
         )
 
         # Pre-compute per-batch-item source token sets for source-copy.
@@ -416,8 +433,8 @@ class ConstraintDecodingProcessor(LogitsProcessor):
         batch_idx = self._batch_idx(hyp_idx)
 
         if state.fsm_state == FSMState.START:
-            # Must start with <ent>.
-            return frozenset({self.ent_id})
+            # Must start with <ent> or any typed entity start token.
+            return frozenset({self.ent_id} | self.typed_ent_ids)
 
         elif state.fsm_state == FSMState.GENERATE_ENT_SPAN:
             return self._source_copy_allowed(batch_idx, state.span_tokens)
@@ -453,7 +470,7 @@ class ConstraintDecodingProcessor(LogitsProcessor):
             # Padding after EOS — no transition.
             return
 
-        if token_id == self.ent_id:
+        if token_id == self.ent_id or token_id in self.typed_ent_ids:
             state.fsm_state = FSMState.GENERATE_ENT_SPAN
             state.span_tokens = []
             state.label_prefix = []

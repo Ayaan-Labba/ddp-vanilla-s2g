@@ -1,0 +1,82 @@
+# =============================================================================
+# Vanilla S2G — CoNLL04 Fine-tuning Configuration
+# =============================================================================
+
+model:
+  name: google/flan-t5-large
+  pretrained_checkpoint: null
+
+tokenization:
+  max_source_length: 340
+  max_target_length: 230
+
+optimizer:
+  optim: adamw_torch
+  lr: 3.0e-5
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
+
+scheduler:
+  type: cosine
+  warmup_steps: 552
+
+train:
+  max_steps: 4600
+  batch_size: 2
+  gradient_acc_steps: 2
+  gradient_clip_value: 1.0
+  gradient_checkpointing: false
+  precision: '32'
+  seed: 0
+
+validation:
+  check_interval: 230
+  percent_check: 1.0
+  train_eval_percent_check: 0.25
+  batch_size: 128
+  early_stopping_patience: 3
+  early_stopping_metric: val_avg_f1
+
+generation:
+  num_beams: 1
+  length_penalty: 0.0
+  no_repeat_ngram_size: 0
+  early_stopping: false
+  constraint_decoding: false
+
+ssi:
+  max_types_in_prompt: 10
+  random_prompt: false
+  random_sel: false
+
+typed_sel:
+  enabled: true
+  entity_types: [location, organization, other, person]
+
+checkpoint:
+  save_top_k: 3
+  metric: val_avg_f1
+  mode: max
+  save_last: true
+  every_n_steps: 500
+  resume_from: null
+
+callbacks:
+  sample_generation_interval: 460
+
+wandb:
+  project: ddp-vanilla-s2g
+  entity: null
+  run_name: conll04-finetune
+
+data:
+  data_dir: data/conll04
+  schema_file: data/conll04/relation.schema
+  output_dir: outputs/finetune/conll04
+
+hardware:
+  num_workers: 4
+  persistent_workers: true
+  gpu_ids: null

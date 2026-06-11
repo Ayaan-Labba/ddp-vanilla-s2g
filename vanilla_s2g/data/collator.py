@@ -80,10 +80,10 @@ class S2GCollator:
         self.config = config
 
         self.mode = config.get("mode", "schedule")
-        if self.mode not in ("schedule", "budget"):
+        if self.mode not in ("schedule", "budget", "static"):
             raise ValueError(
                 f"Unknown collator mode '{self.mode}'. "
-                "Expected 'schedule' or 'budget'."
+                "Expected 'schedule', 'budget', or 'static'."
             )
         if self.mode == "budget" and config.get("max_types_in_prompt") is None:
             raise ValueError(
@@ -160,7 +160,20 @@ class S2GCollator:
         """Dispatch to the active mode's sampler."""
         if self.mode == "budget":
             return self._sample_types_budget(instance_types)
+        elif self.mode == "static":
+            return self._sample_types_static(instance_types)
         return self._sample_types_schedule(instance_types)
+
+    def _sample_types_static(
+        self,
+        instance_types: List[str],
+    ) -> tuple[List[str], List[str]]:
+        """Static-mode sampling.
+        Includes all schema types: gold positives plus all negatives.
+        """
+        instance_set = set(instance_types)
+        negatives = [t for t in self.schema if t not in instance_set]
+        return list(instance_types), negatives
 
     def _sample_types_schedule(
         self,
@@ -268,6 +281,7 @@ class S2GCollator:
             filtered_blocks,
             rejected_types=sampled_neg,
             random_sel=self.config["random_sel"],
+            typed_sel_enabled=self.config.get("typed_sel_enabled", False),
         )
 
         return encoder_input, decoder_target

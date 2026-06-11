@@ -16,13 +16,6 @@ omegaconf>=2.3.0
 # Experiment tracking
 wandb>=0.16.0
 
-# Distributed training
-# 0.16.0 is the floor for stable ZeRO-2 + HuggingFace Trainer integration.
-# Python 3.14 annotation handling requires >=0.16.0; install with ninja for
-# JIT CUDA extension compilation (nvcc must also be on PATH at runtime).
-deepspeed>=0.16.0
-ninja                   # Build backend for DeepSpeed JIT CUDA ops
-
 # Utilities
 numpy>=1.24.0
 tqdm>=4.65.0

@@ -51,6 +51,9 @@ from vanilla_s2g.linearisation import (
     add_special_tokens_to_tokenizer,
     build_encoder_input,
     extract_triplets,
+    extract_quintuples,
+    build_sel,
+    organize_by_entity,
     parse_sel,
 )
 from vanilla_s2g.model import build_constraint_processor
@@ -125,6 +128,7 @@ def evaluate(
     max_types_in_prompt: Optional[int] = None,
     random_prompt: bool = False,
     seed: int = 0,
+    typed_sel_enabled: bool = False,
 ) -> Dict[str, float]:
     """Run full evaluation and write output files.
 
@@ -270,17 +274,28 @@ def evaluate(
                 )
                 pred_sel = _clean_decoded(pred_sel, tokenizer)
                 pred_ents, pred_rejected = parse_sel(pred_sel)
-                pred_triplets = extract_triplets(pred_ents)
 
                 # Gold SEL.
-                gold_ents, gold_rejected = parse_sel(inst["sel"])
-                gold_triplets = extract_triplets(gold_ents)
+                if typed_sel_enabled:
+                    gold_blocks = organize_by_entity(inst["entities"], inst["relations"])
+                    gold_sel = build_sel(gold_blocks, rejected_types=[], typed_sel_enabled=True)
+                    gold_ents, gold_rejected = parse_sel(gold_sel)
+                    pred_triplets = extract_quintuples(pred_ents)
+                    gold_triplets = extract_quintuples(gold_ents)
+                    pred_entities = [(e["text"], e.get("type", "")) for e in pred_ents]
+                    gold_entities = [(e["text"], e.get("type", "")) for e in gold_ents]
+                else:
+                    gold_ents, gold_rejected = parse_sel(inst["sel"])
+                    pred_triplets = extract_triplets(pred_ents)
+                    gold_triplets = extract_triplets(gold_ents)
+                    pred_entities = [e["text"] for e in pred_ents]
+                    gold_entities = [e["text"] for e in gold_ents]
 
                 # Accumulate.
                 all_pred_triplets.append(pred_triplets)
                 all_gold_triplets.append(gold_triplets)
-                all_pred_entities.append([e["text"] for e in pred_ents])
-                all_gold_entities.append([e["text"] for e in gold_ents])
+                all_pred_entities.append(pred_entities)
+                all_gold_entities.append(gold_entities)
 
                 # Write output SEL.
                 f_out.write(json.dumps({"sel": pred_sel}, ensure_ascii=False) + "\n")
@@ -313,10 +328,12 @@ def evaluate(
         f_results.close()
 
     # Compute corpus-level metrics.
+    eval_mode = "strict" if typed_sel_enabled else mode
     metrics = compute_metrics(
         all_pred_triplets, all_gold_triplets,
         all_pred_entities, all_gold_entities,
-        mode=mode,
+        mode=eval_mode,
+        typed_ner=typed_sel_enabled,
     )
 
     # Write metrics.
@@ -417,6 +434,7 @@ def main() -> None:
         max_types_in_prompt=cfg.ssi.max_types_in_prompt,
         random_prompt=cfg.ssi.random_prompt,
         seed=cfg.train.seed,
+        typed_sel_enabled=cfg.typed_sel.enabled,
     )
 
 

@@ -42,6 +42,7 @@ EntityBlock = Dict[str, Any]
 # During construction, may also carry "offset" and "type" metadata.
 
 Triplet = Tuple[str, str, str]  # (head_text, relation_type, tail_text)
+Quintuple = Tuple[str, str, str, str, str]  # (head_text, head_type, relation_type, tail_text, tail_type)
 
 
 # ===================================================================== #
@@ -154,6 +155,7 @@ def build_sel(
     rejected_types: Optional[List[str]] = None,
     random_sel: bool = False,
     special_tokens: Optional[SpecialTokens] = None,
+    typed_sel_enabled: bool = False,
 ) -> str:
     """Build the flat SEL target string from entity blocks and rejected types.
 
@@ -165,6 +167,7 @@ def build_sel(
         random_sel:     If ``True``, randomise entity order and relation
                         order within each entity.
         special_tokens: Token registry (defaults to the module singleton).
+        typed_sel_enabled: If ``True``, use type-specific entity tokens.
 
     Returns:
         Flat SEL string ready for tokenisation as the decoder target.
@@ -194,7 +197,11 @@ def build_sel(
     parts: List[str] = []
 
     for entity in blocks:
-        parts.append(f"{st.ent_start} {entity['text']}")
+        if typed_sel_enabled and entity.get("type"):
+            ent_type = entity["type"].replace(" ", "_")
+            parts.append(f"<{ent_type}> {entity['text']}")
+        else:
+            parts.append(f"{st.ent_start} {entity['text']}")
 
         rels = list(entity["relations"])
         if random_sel:
@@ -307,12 +314,18 @@ def parse_sel(
 
     # ---- Main scan ----
     for token in tokens:
-        if token == st.ent_start:
+        is_ent_start = (token == st.ent_start) or (
+            token.startswith("<") and token.endswith(">") and token not in {st.rel_open, st.tail_start, st.reject_type, st.type_prompt, st.text_start}
+        )
+        if is_ent_start:
             if state == _State.READ_NULL_LABEL:
                 flush_null()
             flush_tail()
             flush_entity()
-            current_entity = {"text": "", "relations": []}
+            ent_type = ""
+            if token != st.ent_start:
+                ent_type = token[1:-1].replace("_", " ")
+            current_entity = {"text": "", "type": ent_type, "relations": []}
             state = _State.READ_ENT_SPAN
 
         elif token == st.rel_open:
@@ -375,6 +388,27 @@ def extract_triplets(entities: List[EntityBlock]) -> List[Triplet]:
         for rel in entity["relations"]:
             triplets.append((entity["text"], rel["type"], rel["tail"]))
     return triplets
+
+
+def extract_quintuples(entities: List[EntityBlock]) -> List[Quintuple]:
+    """Flatten entity blocks into ``(head, head_type, relation_type, tail, tail_type)`` quintuples.
+
+    Args:
+        entities: Parsed entity blocks (output of :func:`parse_sel`).
+
+    Returns:
+        List of quintuple tuples.
+    """
+    text_to_type = {ent["text"]: ent.get("type", "") for ent in entities}
+    quintuples = []
+    for entity in entities:
+        head_text = entity["text"]
+        head_type = entity.get("type", "")
+        for rel in entity["relations"]:
+            tail_text = rel["tail"]
+            tail_type = text_to_type.get(tail_text, "")
+            quintuples.append((head_text, head_type, rel["type"], tail_text, tail_type))
+    return quintuples
 
 
 # ===================================================================== #

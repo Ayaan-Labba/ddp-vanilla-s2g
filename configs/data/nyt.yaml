@@ -1,0 +1,29 @@
+entities:
+  LOCATION: location
+  ORGANIZATION: organization
+  PERSON: person
+relations:
+  administrative_divisions: administrative divisions
+  advisors: advisors
+  capital: capital
+  children: children
+  company: company
+  contains: contains
+  country: country
+  ethnicity: ethnicity
+  founders: founders
+  geographic_distribution: geographic distribution
+  industry: industry
+  location: location
+  major_shareholder_of: major shareholder of
+  major_shareholders: major shareholders
+  nationality: nationality
+  neighborhood_of: neighborhood of
+  people: people
+  place_founded: place founded
+  place_lived: place lived
+  place_of_birth: place of birth
+  place_of_death: place of death
+  profession: profession
+  religion: religion
+  teams: teams

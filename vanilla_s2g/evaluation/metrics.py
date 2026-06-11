@@ -317,9 +317,10 @@ def corpus_ner_f1(
 def compute_metrics(
     all_predicted_triplets: List[List[Triplet]],
     all_gold_triplets: List[List[Triplet]],
-    all_predicted_entities: Optional[List[List[str]]] = None,
-    all_gold_entities: Optional[List[List[str]]] = None,
+    all_predicted_entities: Optional[List[List[Any]]] = None,
+    all_gold_entities: Optional[List[List[Any]]] = None,
     mode: str = "boundary",
+    typed_ner: bool = False,
 ) -> Dict[str, float]:
     """Unified metric computation entry point.
 
@@ -329,8 +330,9 @@ def compute_metrics(
         all_predicted_entities: Predicted entity text lists (for NER metrics).
         all_gold_entities:      Gold entity text lists.
         mode:                   ``"boundary"`` (pre-training) or ``"strict"``
-                                (fine-tuning).  When ``"strict"``, triplets
-                                are expected to be quintuples.
+                                 (fine-tuning).  When ``"strict"``, triplets
+                                 are expected to be quintuples.
+        typed_ner:              If ``True``, entities are ``(text, type)`` tuples.
 
     Returns:
         Combined metric dict.
@@ -360,6 +362,6 @@ def compute_metrics(
 
     # NER metrics (optional).
     if all_predicted_entities is not None and all_gold_entities is not None:
-        metrics.update(corpus_ner_f1(all_predicted_entities, all_gold_entities))
+        metrics.update(corpus_ner_f1(all_predicted_entities, all_gold_entities, typed=typed_ner))
 
     return metrics

@@ -1,0 +1,15 @@
+entities:
+  Generic: generic
+  Material: material
+  Method: method
+  Metric: metric
+  OtherScientificTerm: other scientific term
+  Task: task
+relations:
+  COMPARE: compare
+  CONJUNCTION: conjunction
+  EVALUATE-FOR: evaluate for
+  FEATURE-OF: feature of
+  HYPONYM-OF: hyponym of
+  PART-OF: part of
+  USED-FOR: used for

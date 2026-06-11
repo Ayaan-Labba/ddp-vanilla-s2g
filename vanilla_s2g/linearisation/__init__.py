@@ -22,6 +22,7 @@ Public API
 from .sel import (
     build_sel,
     extract_triplets,
+    extract_quintuples,
     filter_entity_blocks,
     organize_by_entity,
     parse_sel,
@@ -49,4 +50,5 @@ __all__ = [
     "build_sel",
     "parse_sel",
     "extract_triplets",
+    "extract_quintuples",
 ]
