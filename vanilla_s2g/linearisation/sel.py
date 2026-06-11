@@ -29,6 +29,7 @@ to the linearisation format is reflected in both directions at once.
 
 from __future__ import annotations
 
+import re
 import random as _random
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -262,9 +263,7 @@ def parse_sel(
     special_set: Set[str] = set(st.all_tokens)
 
     # Forcefully pad special tokens with spaces so glued tokens detach
-    padded_text = text
-    for token in special_set:
-        padded_text = padded_text.replace(token, f" {token} ")
+    padded_text = re.sub(r'(<[^>\s]+>)', r' \1 ', text)
 
     # Tokenise by whitespace.  Special tokens were added as whole tokens to
     # the vocabulary, so after decode() they appear as space-separated words.
@@ -431,7 +430,7 @@ def _segment_words(words: List[str], special_set: Set[str]) -> List[str]:
     buffer: List[str] = []
 
     for w in words:
-        if w in special_set:
+        if w in special_set or (w.startswith('<') and w.endswith('>')):
             if buffer:
                 tokens.append(" ".join(buffer))
                 buffer = []

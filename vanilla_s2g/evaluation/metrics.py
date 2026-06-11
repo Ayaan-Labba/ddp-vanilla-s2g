@@ -341,6 +341,7 @@ def compute_metrics(
 
     if mode == "boundary":
         metrics.update(corpus_boundary_f1(all_predicted_triplets, all_gold_triplets))
+        metrics["avg_f1"] = metrics["boundary_f1"]
     elif mode == "strict":
         # In strict mode, triplets are actually quintuples.
         metrics.update(corpus_strict_f1(all_predicted_triplets, all_gold_triplets))  # type: ignore

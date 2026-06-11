@@ -37,7 +37,7 @@ validation:
   train_eval_percent_check: 0.25
   batch_size: 512
   early_stopping_patience: 5
-  early_stopping_metric: val_strict_f1
+  early_stopping_metric: val_boundary_f1
 
 generation:
   num_beams: 1
@@ -52,12 +52,12 @@ ssi:
   random_sel: false
 
 typed_sel:
-  enabled: true
+  enabled: false
   entity_types: [location, organization, other, person]
 
 checkpoint:
   save_top_k: 3
-  metric: val_strict_f1
+  metric: val_boundary_f1
   mode: max
   save_last: true
   every_n_steps: 1000
@@ -69,7 +69,7 @@ callbacks:
 wandb:
   project: ddp-vanilla-s2g
   entity: null
-  run_name: v1-large-conll04
+  run_name: v1-large-conll04-ut
 
 data:
   data_dir: data/conll04

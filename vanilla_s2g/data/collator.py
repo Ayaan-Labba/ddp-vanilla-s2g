@@ -169,10 +169,16 @@ class S2GCollator:
         instance_types: List[str],
     ) -> tuple[List[str], List[str]]:
         """Static-mode sampling.
-        Includes all schema types: gold positives plus all negatives.
+        Includes all schema types: gold positives plus all negatives,
+        capped to max_types_in_prompt if set.
         """
         instance_set = set(instance_types)
         negatives = [t for t in self.schema if t not in instance_set]
+        max_types = self.config.get("max_types_in_prompt", None)
+        if max_types is not None:
+            neg_budget = max(0, max_types - len(instance_types))
+            if len(negatives) > neg_budget:
+                negatives = random.sample(negatives, neg_budget)
         return list(instance_types), negatives
 
     def _sample_types_schedule(

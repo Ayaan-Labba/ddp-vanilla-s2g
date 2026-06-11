@@ -384,7 +384,7 @@ def main() -> None:
     callbacks.append(gen_samples_cb)
 
     # ---- 8. Configure TrainingArguments ----
-    metric_for_best = cfg.checkpoint.metric
+    metric_for_best = cfg.validation.early_stopping_metric
     if metric_for_best.startswith("val_"):
         metric_for_best = metric_for_best[4:]  # e.g., "avg_f1"
 
@@ -469,23 +469,6 @@ def main() -> None:
     trainer.save_model(str(best_dir))
     tokenizer.save_pretrained(str(best_dir))
     logger.info("Best model saved to %s", best_dir)
-
-    # ---- 12. Final evaluation on validation set ----
-    logger.info("Loading full validation set for final evaluation...")
-    full_val_dataset = S2GDataset(
-        Path(cfg.data.data_dir) / "val.jsonl",
-        seed=cfg.train.seed, 
-    )
-    logger.info("Full Val: %d instances", len(full_val_dataset))
-
-    logger.info("Running final evaluation on full validation set...")
-    val_metrics = trainer.evaluate(eval_dataset=full_val_dataset)
-    
-    metrics_path = output_dir / "val_metrics.json"
-    with open(metrics_path, "w", encoding="utf-8") as f:
-        json.dump(val_metrics, f, indent=2)
-    logger.info("Validation metrics saved to %s", metrics_path)
-    logger.info("Final val metrics: %s", val_metrics)
 
 
 if __name__ == "__main__":

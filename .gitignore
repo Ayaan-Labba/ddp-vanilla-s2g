@@ -2,6 +2,7 @@
 /data/
 
 # Environment
+vs2g_env/
 vs2g-env/
 *__pycache__/
 .vscode/
